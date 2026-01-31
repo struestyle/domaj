@@ -5,6 +5,7 @@
         createServer,
         deleteServer,
         syncServer,
+        updateServer,
     } from "$lib/api.js";
 
     let servers = [];
@@ -13,6 +14,10 @@
     let showAddForm = false;
     let newServer = { name: "", endpoint: "" };
     let submitting = false;
+
+    // Edit state
+    let editingServer = null;
+    let editForm = { name: "", endpoint: "" };
 
     onMount(async () => {
         await loadServers();
@@ -63,6 +68,31 @@
             await loadServers();
         } catch (e) {
             alert("Erreur de synchronisation: " + e.message);
+        }
+    }
+
+    function startEdit(server) {
+        editingServer = server;
+        editForm = { name: server.name, endpoint: server.endpoint };
+    }
+
+    function cancelEdit() {
+        editingServer = null;
+        editForm = { name: "", endpoint: "" };
+    }
+
+    async function handleUpdateServer() {
+        if (!editForm.name || !editForm.endpoint) return;
+
+        try {
+            submitting = true;
+            const updated = await updateServer(editingServer.id, editForm);
+            servers = servers.map((s) => (s.id === updated.id ? updated : s));
+            cancelEdit();
+        } catch (e) {
+            alert("Erreur: " + e.message);
+        } finally {
+            submitting = false;
         }
     }
 </script>
@@ -172,7 +202,7 @@
                             </div>
                             {#if server.last_seen}
                                 <div class="server-lastseen text-xs text-muted">
-                                    Dernière vue: {new Date(
+                                    Dernière synchronisation: {new Date(
                                         server.last_seen,
                                     ).toLocaleString("fr-FR")}
                                 </div>
@@ -185,6 +215,12 @@
                             on:click={() => handleSyncServer(server.id)}
                         >
                             🔄 Sync
+                        </button>
+                        <button
+                            class="btn btn-secondary"
+                            on:click={() => startEdit(server)}
+                        >
+                            ✏️
                         </button>
                         <a
                             href="/servers/{server.id}"
@@ -204,6 +240,52 @@
         </div>
     {/if}
 </div>
+
+{#if editingServer}
+    <div class="modal-overlay" on:click={cancelEdit}>
+        <div class="modal" on:click|stopPropagation>
+            <h3>Modifier le serveur</h3>
+            <form on:submit|preventDefault={handleUpdateServer}>
+                <div class="form-group">
+                    <label for="edit-name">Nom du serveur</label>
+                    <input
+                        type="text"
+                        id="edit-name"
+                        class="input"
+                        bind:value={editForm.name}
+                        required
+                    />
+                </div>
+                <div class="form-group">
+                    <label for="edit-endpoint">URL de l'agent</label>
+                    <input
+                        type="url"
+                        id="edit-endpoint"
+                        class="input"
+                        bind:value={editForm.endpoint}
+                        required
+                    />
+                </div>
+                <div class="modal-actions">
+                    <button
+                        type="button"
+                        class="btn btn-secondary"
+                        on:click={cancelEdit}
+                    >
+                        Annuler
+                    </button>
+                    <button
+                        type="submit"
+                        class="btn btn-primary"
+                        disabled={submitting}
+                    >
+                        {submitting ? "Enregistrement..." : "Enregistrer"}
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+{/if}
 
 <style>
     .page-header {
@@ -318,5 +400,43 @@
         .server-actions {
             width: 100%;
         }
+    }
+
+    /* Modal styles */
+    .modal-overlay {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(0, 0, 0, 0.7);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 1000;
+    }
+
+    .modal {
+        background: var(--bg-secondary);
+        border-radius: var(--border-radius-lg);
+        padding: var(--spacing-xl);
+        max-width: 500px;
+        width: 90%;
+        border: 1px solid var(--border-color);
+    }
+
+    .modal h3 {
+        margin-bottom: var(--spacing-lg);
+    }
+
+    .modal .form-group {
+        margin-bottom: var(--spacing-md);
+    }
+
+    .modal-actions {
+        display: flex;
+        gap: var(--spacing-md);
+        justify-content: flex-end;
+        margin-top: var(--spacing-lg);
     }
 </style>

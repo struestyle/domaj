@@ -14,6 +14,7 @@ use axum::{
 };
 use tower_http::trace::TraceLayer;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+use uuid::Uuid;
 
 use crate::docker::DockerClient;
 
@@ -22,6 +23,7 @@ use crate::docker::DockerClient;
 pub struct Config {
     pub port: u16,
     pub api_key: String,
+    pub agent_id: String,
 }
 
 impl Config {
@@ -36,8 +38,40 @@ impl Config {
             String::new()
         });
 
-        Ok(Self { port, api_key })
+        // Get or generate unique agent ID
+        let agent_id = get_or_create_agent_id()?;
+
+        Ok(Self { port, api_key, agent_id })
     }
+}
+
+/// Get existing agent ID from file or create a new one
+fn get_or_create_agent_id() -> anyhow::Result<String> {
+    let id_path = std::path::Path::new("/data/agent_id");
+    
+    // Try to read existing ID
+    if id_path.exists() {
+        if let Ok(id) = std::fs::read_to_string(id_path) {
+            let id = id.trim().to_string();
+            if !id.is_empty() {
+                return Ok(id);
+            }
+        }
+    }
+    
+    // Create data directory if needed
+    if let Some(parent) = id_path.parent() {
+        std::fs::create_dir_all(parent).ok();
+    }
+    
+    // Generate new UUID
+    let new_id = Uuid::new_v4().to_string();
+    
+    // Save to file
+    std::fs::write(id_path, &new_id)?;
+    tracing::info!("🆔 Generated new agent ID: {}", new_id);
+    
+    Ok(new_id)
 }
 
 /// Application state
@@ -64,6 +98,7 @@ async fn main() -> anyhow::Result<()> {
 
     // Load configuration
     let config = Config::from_env()?;
+    tracing::info!("🆔 Agent ID: {}", config.agent_id);
 
     // Initialize Docker client
     let docker = DockerClient::new().await?;
@@ -75,8 +110,9 @@ async fn main() -> anyhow::Result<()> {
     // Build router
     let app = Router::new()
         .route("/health", get(health))
+        .route("/info", get(info))
         .route("/containers", get(list_containers))
-        .route("/containers/{id}", get(get_container))
+        .route("/containers/:id", get(get_container))
         .layer(TraceLayer::new_for_http())
         .with_state(state);
 
@@ -94,6 +130,16 @@ async fn main() -> anyhow::Result<()> {
 async fn health() -> Json<serde_json::Value> {
     Json(serde_json::json!({
         "status": "ok",
+        "version": env!("CARGO_PKG_VERSION"),
+    }))
+}
+
+/// Agent info endpoint - returns unique agent ID
+async fn info(
+    State(state): State<Arc<AppState>>,
+) -> Json<serde_json::Value> {
+    Json(serde_json::json!({
+        "agent_id": state.config.agent_id,
         "version": env!("CARGO_PKG_VERSION"),
     }))
 }

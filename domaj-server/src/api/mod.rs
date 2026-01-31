@@ -8,7 +8,7 @@ mod websocket;
 
 use std::sync::Arc;
 use axum::{
-    routing::{get, post, delete},
+    routing::{get, post, delete, put},
     Router,
 };
 
@@ -20,15 +20,16 @@ pub fn router() -> Router<Arc<AppState>> {
         // Server management
         .route("/servers", get(servers::list_servers))
         .route("/servers", post(servers::create_server))
-        .route("/servers/{id}", get(servers::get_server))
-        .route("/servers/{id}", delete(servers::delete_server))
-        .route("/servers/{id}/containers", get(servers::get_server_containers))
-        .route("/servers/{id}/sync", post(servers::sync_server))
+        .route("/servers/:id", get(servers::get_server))
+        .route("/servers/:id", put(servers::update_server))
+        .route("/servers/:id", delete(servers::delete_server))
+        .route("/servers/:id/containers", get(servers::get_server_containers))
+        .route("/servers/:id/sync", post(servers::sync_server))
         
         // Container management
         .route("/containers", get(containers::list_containers))
-        .route("/containers/{id}", get(containers::get_container))
-        .route("/containers/{id}/updates", get(containers::get_container_updates))
+        .route("/containers/:id", get(containers::get_container))
+        .route("/containers/:id/updates", get(containers::get_container_updates))
         
         // Updates overview
         .route("/updates", get(containers::list_updates))

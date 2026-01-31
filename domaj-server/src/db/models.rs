@@ -11,7 +11,7 @@ pub struct Server {
     pub name: String,
     pub endpoint: String,
     pub api_key: String,
-    #[serde(skip_serializing)]
+    pub agent_id: Option<String>,
     pub last_seen: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
 }

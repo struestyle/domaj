@@ -50,6 +50,7 @@ async fn run_migrations(pool: &SqlitePool) -> Result<()> {
             name TEXT NOT NULL,
             endpoint TEXT NOT NULL,
             api_key TEXT NOT NULL,
+            agent_id TEXT UNIQUE,
             last_seen DATETIME,
             created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
         )

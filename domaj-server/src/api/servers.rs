@@ -48,21 +48,62 @@ pub async fn get_server(
 pub async fn create_server(
     State(state): State<Arc<AppState>>,
     Json(input): Json<CreateServer>,
-) -> Result<(StatusCode, Json<Server>), StatusCode> {
+) -> Result<(StatusCode, Json<Server>), (StatusCode, Json<serde_json::Value>)> {
+    // Fetch agent info to get unique agent_id
+    let client = reqwest::Client::new();
+    let info_url = format!("{}/info", input.endpoint.trim_end_matches('/'));
+    
+    let agent_id = match client
+        .get(&info_url)
+        .header("X-API-Key", &state.config.api_secret)
+        .send()
+        .await
+    {
+        Ok(response) if response.status().is_success() => {
+            #[derive(serde::Deserialize)]
+            struct AgentInfo {
+                agent_id: String,
+            }
+            match response.json::<AgentInfo>().await {
+                Ok(info) => Some(info.agent_id),
+                Err(_) => None,
+            }
+        }
+        _ => None,
+    };
+    
+    // Check for duplicate agent_id
+    if let Some(ref aid) = agent_id {
+        let existing = sqlx::query_as::<_, Server>("SELECT * FROM servers WHERE agent_id = ?")
+            .bind(aid)
+            .fetch_optional(&state.db)
+            .await
+            .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": "Database error"}))))?;
+        
+        if let Some(existing_server) = existing {
+            return Err((StatusCode::CONFLICT, Json(serde_json::json!({
+                "error": "duplicate_agent",
+                "message": format!("Cet agent est déjà configuré sous le nom '{}'", existing_server.name),
+                "existing_server": existing_server.name
+            }))));
+        }
+    }
+
     // Generate a unique API key for this server
     let api_key = Uuid::new_v4().to_string();
 
     let result = sqlx::query(
-        "INSERT INTO servers (name, endpoint, api_key) VALUES (?, ?, ?)",
+        "INSERT INTO servers (name, endpoint, api_key, agent_id) VALUES (?, ?, ?, ?)",
     )
     .bind(&input.name)
     .bind(&input.endpoint)
     .bind(&api_key)
+    .bind(&agent_id)
     .execute(&state.db)
     .await
     .map_err(|e| {
         tracing::error!("Failed to create server: {}", e);
-        StatusCode::INTERNAL_SERVER_ERROR
+        (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": "Failed to create server"})))
     })?;
 
     let server = sqlx::query_as::<_, Server>("SELECT * FROM servers WHERE id = ?")
@@ -71,10 +112,10 @@ pub async fn create_server(
         .await
         .map_err(|e| {
             tracing::error!("Failed to fetch created server: {}", e);
-            StatusCode::INTERNAL_SERVER_ERROR
+            (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": "Failed to fetch server"})))
         })?;
 
-    tracing::info!("Created server: {} ({})", server.name, server.endpoint);
+    tracing::info!("Created server: {} ({}) with agent_id: {:?}", server.name, server.endpoint, agent_id);
     Ok((StatusCode::CREATED, Json(server)))
 }
 
@@ -98,6 +139,42 @@ pub async fn delete_server(
 
     tracing::info!("Deleted server with id: {}", id);
     Ok(StatusCode::NO_CONTENT)
+}
+
+/// Update a server
+pub async fn update_server(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<i64>,
+    Json(input): Json<CreateServer>,
+) -> Result<Json<Server>, StatusCode> {
+    let result = sqlx::query(
+        "UPDATE servers SET name = ?, endpoint = ? WHERE id = ?",
+    )
+    .bind(&input.name)
+    .bind(&input.endpoint)
+    .bind(id)
+    .execute(&state.db)
+    .await
+    .map_err(|e| {
+        tracing::error!("Failed to update server: {}", e);
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    if result.rows_affected() == 0 {
+        return Err(StatusCode::NOT_FOUND);
+    }
+
+    let server = sqlx::query_as::<_, Server>("SELECT * FROM servers WHERE id = ?")
+        .bind(id)
+        .fetch_one(&state.db)
+        .await
+        .map_err(|e| {
+            tracing::error!("Failed to fetch updated server: {}", e);
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+
+    tracing::info!("Updated server: {} ({})", server.name, server.endpoint);
+    Ok(Json(server))
 }
 
 /// Get containers for a specific server
@@ -146,7 +223,7 @@ pub async fn sync_server(
     
     let response = client
         .get(&agent_url)
-        .header("X-API-Key", &server.api_key)
+        .header("X-API-Key", &state.config.api_secret)
         .send()
         .await
         .map_err(|e| {
