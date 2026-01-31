@@ -104,6 +104,34 @@ a:hover {
   transform: none;
 }
 
+/* Stat Cards */
+.stat-card {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-md);
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius);
+  padding: var(--spacing-sm) var(--spacing-md);
+  height: 60px;
+}
+
+.stat-content {
+  display: flex;
+  align-items: baseline;
+  gap: var(--spacing-sm);
+}
+
+.stat-value {
+  font-size: 1.5rem;
+  font-weight: 700;
+}
+
+.stat-label {
+  color: var(--text-secondary);
+  font-size: 0.875rem;
+}
+
 /* Buttons */
 .btn {
   display: inline-flex;

@@ -40,7 +40,6 @@
       <div class="nav-links">
         <a href="/" class="nav-link">Dashboard</a>
         <a href="/servers" class="nav-link">Serveurs</a>
-        <a href="/updates" class="nav-link">Mises à jour</a>
       </div>
 
       <div class="nav-actions">

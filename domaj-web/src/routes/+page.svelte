@@ -104,16 +104,16 @@
     </header>
 
     {#if loading}
-        <div class="grid grid-4">
-            {#each [1, 2, 3, 4] as _}
-                <div class="card">
+        <div class="grid grid-3">
+            {#each [1, 2, 3] as _}
+                <div class="stat-card">
                     <div
                         class="skeleton"
-                        style="height: 20px; width: 60%; margin-bottom: 10px;"
+                        style="height: 16px; width: 50%;"
                     ></div>
                     <div
                         class="skeleton"
-                        style="height: 40px; width: 40%;"
+                        style="height: 24px; width: 30%;"
                     ></div>
                 </div>
             {/each}
@@ -143,7 +143,7 @@
         </div>
     {:else}
         <!-- Stats Cards -->
-        <div class="grid grid-4 mb-lg">
+        <div class="grid grid-3 mb-lg">
             <div class="stat-card">
                 <div class="stat-icon">
                     <svg
@@ -205,41 +205,6 @@
                 <div class="stat-content">
                     <div class="stat-value">{updates.length}</div>
                     <div class="stat-label">Mises à jour</div>
-                </div>
-            </div>
-
-            <div class="stat-card">
-                <div class="stat-icon">
-                    {#if status?.status === "ok"}
-                        <svg
-                            class="icon-success"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            stroke-width="2"
-                        >
-                            <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
-                            <polyline points="22 4 12 14.01 9 11.01"></polyline>
-                        </svg>
-                    {:else}
-                        <svg
-                            class="icon-danger"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            stroke-width="2"
-                        >
-                            <circle cx="12" cy="12" r="10"></circle>
-                            <line x1="15" y1="9" x2="9" y2="15"></line>
-                            <line x1="9" y1="9" x2="15" y2="15"></line>
-                        </svg>
-                    {/if}
-                </div>
-                <div class="stat-content">
-                    <div class="stat-value">
-                        {status?.status === "ok" ? "En ligne" : "Hors ligne"}
-                    </div>
-                    <div class="stat-label">Statut API</div>
                 </div>
             </div>
         </div>
@@ -542,7 +507,7 @@
         background: var(--bg-card);
         border: 1px solid var(--border-color);
         border-radius: var(--border-radius);
-        padding: var(--spacing-lg);
+        padding: var(--spacing-sm) var(--spacing-md);
     }
 
     .stat-card.update-card {
@@ -576,8 +541,14 @@
         stroke: var(--color-danger);
     }
 
+    .stat-content {
+        display: flex;
+        align-items: baseline;
+        gap: var(--spacing-sm);
+    }
+
     .stat-value {
-        font-size: 1.75rem;
+        font-size: 1.5rem;
         font-weight: 700;
     }
 
