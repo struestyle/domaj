@@ -1,16 +1,40 @@
 <script>
-    import { onMount } from "svelte";
+    import { onMount, tick } from "svelte";
     import {
         getServers,
         getContainers,
         getUpdates,
         getStatus,
+        getStats,
     } from "$lib/api.js";
+    import {
+        Chart,
+        ArcElement,
+        BarElement,
+        CategoryScale,
+        LinearScale,
+        Tooltip,
+        Legend,
+        DoughnutController,
+        BarController,
+    } from "chart.js";
+
+    Chart.register(
+        ArcElement,
+        BarElement,
+        CategoryScale,
+        LinearScale,
+        Tooltip,
+        Legend,
+        DoughnutController,
+        BarController,
+    );
 
     let servers = [];
     let containers = [];
     let updates = [];
     let status = null;
+    let stats = null;
     let loading = true;
     let error = null;
 
@@ -18,20 +42,100 @@
     let sortDirection = "asc";
     let copiedId = null;
 
+    let pieChartCanvas;
+    let barChartCanvas;
+    let pieChart;
+    let barChart;
+
     onMount(async () => {
         try {
-            [servers, containers, updates, status] = await Promise.all([
+            [servers, containers, updates, status, stats] = await Promise.all([
                 getServers(),
                 getContainers(),
                 getUpdates(),
                 getStatus(),
+                getStats(),
             ]);
         } catch (e) {
             error = e.message;
         } finally {
             loading = false;
         }
+
+        // Wait for DOM to update with the stats data after loading is false
+        await tick();
+
+        // Initialize charts after DOM is ready
+        if (stats && pieChartCanvas && barChartCanvas) {
+            initCharts();
+        }
     });
+
+    function initCharts() {
+        // Pie chart for update types
+        pieChart = new Chart(pieChartCanvas, {
+            type: "doughnut",
+            data: {
+                labels: ["Patch (même tag)", "Nouvelle version"],
+                datasets: [
+                    {
+                        data: [
+                            stats.updates_by_type.same_tag,
+                            stats.updates_by_type.latest,
+                        ],
+                        backgroundColor: ["#f59e0b", "#10b981"],
+                        borderWidth: 0,
+                    },
+                ],
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        position: "bottom",
+                        labels: { color: "#9ca3af" },
+                    },
+                },
+            },
+        });
+
+        // Bar chart for updates by server
+        const serverLabels = stats.updates_by_server.map((s) => s.server_name);
+        const serverData = stats.updates_by_server.map((s) => s.count);
+
+        barChart = new Chart(barChartCanvas, {
+            type: "bar",
+            data: {
+                labels: serverLabels,
+                datasets: [
+                    {
+                        label: "Mises à jour",
+                        data: serverData,
+                        backgroundColor: "#8b5cf6",
+                        borderRadius: 4,
+                    },
+                ],
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { display: false },
+                },
+                scales: {
+                    x: {
+                        ticks: { color: "#9ca3af" },
+                        grid: { display: false },
+                    },
+                    y: {
+                        ticks: { color: "#9ca3af", stepSize: 1 },
+                        grid: { color: "rgba(156, 163, 175, 0.1)" },
+                    },
+                },
+            },
+        });
+    }
 
     function parseImage(image) {
         const parts = image.split(":");
@@ -208,6 +312,43 @@
                 </div>
             </div>
         </div>
+
+        <!-- Statistics Section -->
+        {#if stats && (stats.updates_by_type.same_tag > 0 || stats.updates_by_type.latest > 0)}
+            <section class="section">
+                <div class="section-header">
+                    <h2>
+                        <svg
+                            class="icon-inline"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            stroke-width="2"
+                        >
+                            <line x1="18" y1="20" x2="18" y2="10"></line>
+                            <line x1="12" y1="20" x2="12" y2="4"></line>
+                            <line x1="6" y1="20" x2="6" y2="14"></line>
+                        </svg>
+                        Statistiques
+                    </h2>
+                </div>
+
+                <div class="charts-grid">
+                    <div class="chart-card card">
+                        <h3 class="chart-title">Types de mises à jour</h3>
+                        <div class="chart-container">
+                            <canvas bind:this={pieChartCanvas}></canvas>
+                        </div>
+                    </div>
+                    <div class="chart-card card">
+                        <h3 class="chart-title">Mises à jour par serveur</h3>
+                        <div class="chart-container">
+                            <canvas bind:this={barChartCanvas}></canvas>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        {/if}
 
         <!-- Updates Section -->
         {#if updates.length > 0}
@@ -554,6 +695,34 @@
     .stat-label {
         color: var(--text-secondary);
         font-size: 0.875rem;
+    }
+
+    .charts-grid {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: var(--spacing-lg);
+    }
+
+    .chart-card {
+        padding: var(--spacing-lg);
+    }
+
+    .chart-title {
+        font-size: 0.9rem;
+        font-weight: 600;
+        color: var(--text-secondary);
+        margin-bottom: var(--spacing-md);
+    }
+
+    .chart-container {
+        height: 200px;
+        position: relative;
+    }
+
+    @media (max-width: 768px) {
+        .charts-grid {
+            grid-template-columns: 1fr;
+        }
     }
 
     .section {

@@ -4,6 +4,7 @@
 
 mod containers;
 mod servers;
+mod stats;
 mod websocket;
 
 use std::sync::Arc;
@@ -36,6 +37,9 @@ pub fn router() -> Router<Arc<AppState>> {
         
         // Actions
         .route("/scan", post(containers::trigger_scan))
+        
+        // Statistics
+        .route("/stats", get(stats::get_stats))
         
         // System status
         .route("/status", get(status))

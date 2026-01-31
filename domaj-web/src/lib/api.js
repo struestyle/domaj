@@ -82,3 +82,7 @@ export async function triggerScan() {
 export async function getStatus() {
     return fetchApi('/status');
 }
+
+export async function getStats() {
+    return fetchApi('/stats');
+}
