@@ -157,19 +157,8 @@
     {/if}
 
     {#if loading}
-        <div class="grid grid-3">
-            {#each [1, 2, 3] as _}
-                <div class="card">
-                    <div
-                        class="skeleton"
-                        style="height: 24px; width: 70%; margin-bottom: 10px;"
-                    ></div>
-                    <div
-                        class="skeleton"
-                        style="height: 16px; width: 90%;"
-                    ></div>
-                </div>
-            {/each}
+        <div class="table-container card">
+            <div class="skeleton" style="height: 200px;"></div>
         </div>
     {:else if error}
         <div class="card error-card">
@@ -184,59 +173,121 @@
             </p>
         </div>
     {:else}
-        <div class="servers-list">
-            {#each servers as server}
-                <div class="server-card card">
-                    <div class="server-main">
-                        <div
-                            class="server-status {server.last_seen
-                                ? 'online'
-                                : 'offline'}"
-                        ></div>
-                        <div class="server-info">
-                            <a href="/servers/{server.id}" class="server-name"
-                                >{server.name}</a
-                            >
-                            <div class="server-endpoint text-sm text-muted">
-                                {server.endpoint}
-                            </div>
-                            {#if server.last_seen}
-                                <div class="server-lastseen text-xs text-muted">
-                                    Dernière synchronisation: {new Date(
-                                        server.last_seen,
-                                    ).toLocaleString("fr-FR")}
+        <div class="table-container card">
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>Statut</th>
+                        <th>Nom</th>
+                        <th>Endpoint</th>
+                        <th>Dernière synchronisation</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {#each servers as server}
+                        <tr>
+                            <td>
+                                <span
+                                    class="status-indicator {server.last_seen
+                                        ? 'status-online'
+                                        : 'status-offline'}"
+                                >
+                                    {server.last_seen
+                                        ? "En ligne"
+                                        : "Hors ligne"}
+                                </span>
+                            </td>
+                            <td>
+                                <a
+                                    href="/servers/{server.id}"
+                                    class="link-primary">{server.name}</a
+                                >
+                            </td>
+                            <td>
+                                <code class="endpoint-code"
+                                    >{server.endpoint}</code
+                                >
+                            </td>
+                            <td>
+                                {#if server.last_seen}
+                                    {new Date(server.last_seen).toLocaleString(
+                                        "fr-FR",
+                                    )}
+                                {:else}
+                                    <span class="text-muted">Jamais</span>
+                                {/if}
+                            </td>
+                            <td>
+                                <div class="action-buttons">
+                                    <button
+                                        class="btn btn-secondary"
+                                        on:click={() =>
+                                            handleSyncServer(server.id)}
+                                        title="Synchroniser"
+                                    >
+                                        <svg
+                                            class="btn-icon-only"
+                                            viewBox="0 0 24 24"
+                                            fill="none"
+                                            stroke="currentColor"
+                                            stroke-width="2"
+                                        >
+                                            <polyline points="23 4 23 10 17 10"
+                                            ></polyline>
+                                            <polyline points="1 20 1 14 7 14"
+                                            ></polyline>
+                                            <path
+                                                d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"
+                                            ></path>
+                                        </svg>
+                                    </button>
+                                    <button
+                                        class="btn btn-secondary"
+                                        on:click={() => startEdit(server)}
+                                        title="Modifier"
+                                    >
+                                        <svg
+                                            class="btn-icon-only"
+                                            viewBox="0 0 24 24"
+                                            fill="none"
+                                            stroke="currentColor"
+                                            stroke-width="2"
+                                        >
+                                            <path
+                                                d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"
+                                            ></path>
+                                            <path
+                                                d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"
+                                            ></path>
+                                        </svg>
+                                    </button>
+                                    <button
+                                        class="btn btn-danger"
+                                        on:click={() =>
+                                            handleDeleteServer(server.id)}
+                                        title="Supprimer"
+                                    >
+                                        <svg
+                                            class="btn-icon-only"
+                                            viewBox="0 0 24 24"
+                                            fill="none"
+                                            stroke="currentColor"
+                                            stroke-width="2"
+                                        >
+                                            <polyline points="3 6 5 6 21 6"
+                                            ></polyline>
+                                            <path
+                                                d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"
+                                            ></path>
+                                        </svg>
+                                    </button>
                                 </div>
-                            {/if}
-                        </div>
-                    </div>
-                    <div class="server-actions">
-                        <button
-                            class="btn btn-secondary"
-                            on:click={() => handleSyncServer(server.id)}
-                        >
-                            🔄 Sync
-                        </button>
-                        <button
-                            class="btn btn-secondary"
-                            on:click={() => startEdit(server)}
-                        >
-                            ✏️
-                        </button>
-                        <a
-                            href="/servers/{server.id}"
-                            class="btn btn-secondary"
-                        >
-                            👁️ Voir
-                        </a>
-                        <button
-                            class="btn btn-danger"
-                            on:click={() => handleDeleteServer(server.id)}
-                        >
-                            🗑️
-                        </button>
-                    </div>
-                </div>
-            {/each}
+                            </td>
+                        </tr>
+                    {/each}
+                </tbody>
+            </table>
         </div>
     {/if}
 </div>
@@ -327,53 +378,50 @@
         margin-top: var(--spacing-lg);
     }
 
-    .servers-list {
-        display: flex;
-        flex-direction: column;
-        gap: var(--spacing-md);
+    .status-indicator {
+        display: inline-block;
+        padding: 4px 10px;
+        border-radius: 12px;
+        font-size: 0.75rem;
+        font-weight: 500;
     }
 
-    .server-card {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
+    .status-online {
+        background: rgba(16, 185, 129, 0.15);
+        color: var(--color-success);
     }
 
-    .server-main {
-        display: flex;
-        align-items: center;
-        gap: var(--spacing-md);
+    .status-offline {
+        background: rgba(156, 163, 175, 0.15);
+        color: var(--text-muted);
     }
 
-    .server-status {
-        width: 12px;
-        height: 12px;
-        border-radius: 50%;
-        flex-shrink: 0;
-    }
-
-    .server-status.online {
-        background: var(--color-success);
-        box-shadow: 0 0 8px var(--color-success);
-    }
-
-    .server-status.offline {
-        background: var(--text-muted);
-    }
-
-    .server-name {
-        font-weight: 600;
-        font-size: 1.125rem;
-        color: var(--text-primary);
-    }
-
-    .server-name:hover {
+    .link-primary {
         color: var(--color-primary);
+        font-weight: 500;
     }
 
-    .server-actions {
+    .link-primary:hover {
+        text-decoration: underline;
+    }
+
+    .endpoint-code {
+        font-family: monospace;
+        font-size: 0.8rem;
+        padding: 2px 6px;
+        background: var(--bg-tertiary);
+        border-radius: 4px;
+        color: var(--text-secondary);
+    }
+
+    .action-buttons {
         display: flex;
-        gap: var(--spacing-sm);
+        gap: var(--spacing-xs);
+    }
+
+    .btn-icon-only {
+        width: 16px;
+        height: 16px;
     }
 
     .empty-state {
@@ -389,16 +437,6 @@
     @media (max-width: 768px) {
         .form-grid {
             grid-template-columns: 1fr;
-        }
-
-        .server-card {
-            flex-direction: column;
-            align-items: flex-start;
-            gap: var(--spacing-md);
-        }
-
-        .server-actions {
-            width: 100%;
         }
     }
 
