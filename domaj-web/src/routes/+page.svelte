@@ -229,7 +229,6 @@
                         </svg>
                         Mises à jour disponibles
                     </h2>
-                    <a href="/updates" class="btn btn-secondary">Voir tout</a>
                 </div>
 
                 <div class="table-container card">
