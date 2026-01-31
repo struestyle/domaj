@@ -98,6 +98,12 @@ a:hover {
   transform: translateY(-2px);
 }
 
+.table-container.card:hover {
+  background: var(--bg-card);
+  box-shadow: var(--shadow-sm);
+  transform: none;
+}
+
 /* Buttons */
 .btn {
   display: inline-flex;
@@ -195,10 +201,6 @@ a:hover {
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.5px;
-}
-
-.table tr:hover td {
-  background: var(--bg-card-hover);
 }
 
 /* Forms */

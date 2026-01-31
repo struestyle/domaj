@@ -1,28 +1,41 @@
 <script>
     import { onMount } from "svelte";
-    import { getUpdates } from "$lib/api.js";
+    import { getUpdates, triggerScan } from "$lib/api.js";
 
     let updates = [];
     let loading = true;
     let error = null;
-    let filter = "all";
-
-    $: filteredUpdates =
-        filter === "all"
-            ? updates
-            : filter === "same_tag"
-              ? updates.filter((u) => u.same_tag_update)
-              : updates.filter((u) => u.latest_update);
+    let scanning = false;
 
     onMount(async () => {
+        await loadUpdates();
+    });
+
+    async function loadUpdates() {
         try {
+            loading = true;
             updates = await getUpdates();
         } catch (e) {
             error = e.message;
         } finally {
             loading = false;
         }
-    });
+    }
+
+    async function handleScan() {
+        try {
+            scanning = true;
+            await triggerScan();
+            // Wait a bit for scan to complete
+            setTimeout(async () => {
+                await loadUpdates();
+                scanning = false;
+            }, 3000);
+        } catch (e) {
+            alert("Erreur: " + e.message);
+            scanning = false;
+        }
+    }
 </script>
 
 <svelte:head>
@@ -32,24 +45,29 @@
 <div class="container">
     <header class="page-header">
         <div>
-            <h1>Mises à jour</h1>
-            <p class="text-muted">
-                Conteneurs avec des mises à jour disponibles
-            </p>
+            <h1>Mises à jour disponibles</h1>
+            <p class="text-muted">Conteneurs avec des mises à jour détectées</p>
         </div>
+        <button
+            class="btn btn-primary"
+            on:click={handleScan}
+            disabled={scanning}
+        >
+            {scanning ? "⏳ Scan en cours..." : "🔍 Lancer un scan"}
+        </button>
     </header>
 
     {#if loading}
-        <div class="updates-list">
+        <div class="grid grid-3">
             {#each [1, 2, 3] as _}
                 <div class="card">
                     <div
                         class="skeleton"
-                        style="height: 24px; width: 50%; margin-bottom: 10px;"
+                        style="height: 24px; width: 70%; margin-bottom: 10px;"
                     ></div>
                     <div
                         class="skeleton"
-                        style="height: 16px; width: 70%;"
+                        style="height: 16px; width: 90%;"
                     ></div>
                 </div>
             {/each}
@@ -61,85 +79,68 @@
     {:else if updates.length === 0}
         <div class="empty-state card">
             <div class="empty-icon">✅</div>
-            <h3>Tout est à jour !</h3>
+            <h3>Aucune mise à jour disponible</h3>
             <p class="text-muted">
-                Aucune mise à jour disponible pour vos conteneurs.
+                Tous vos conteneurs sont à jour ! Lancez un scan pour vérifier.
             </p>
         </div>
     {:else}
-        <!-- Filters -->
-        <div class="filters mb-lg">
-            <button
-                class="filter-btn {filter === 'all' ? 'active' : ''}"
-                on:click={() => (filter = "all")}
-            >
-                Tous ({updates.length})
-            </button>
-            <button
-                class="filter-btn {filter === 'same_tag' ? 'active' : ''}"
-                on:click={() => (filter = "same_tag")}
-            >
-                🔄 Même tag ({updates.filter((u) => u.same_tag_update).length})
-            </button>
-            <button
-                class="filter-btn {filter === 'latest' ? 'active' : ''}"
-                on:click={() => (filter = "latest")}
-            >
-                🆕 Nouvelle version ({updates.filter((u) => u.latest_update)
-                    .length})
-            </button>
+        <div class="updates-summary">
+            <div class="stat-card card">
+                <span class="stat-number">{updates.length}</span>
+                <span class="stat-label"
+                    >Mise{updates.length > 1 ? "s" : ""} à jour</span
+                >
+            </div>
+            <div class="stat-card card warning">
+                <span class="stat-number"
+                    >{updates.filter((u) => u.same_tag_update).length}</span
+                >
+                <span class="stat-label">Même tag (patch)</span>
+            </div>
+            <div class="stat-card card info">
+                <span class="stat-number"
+                    >{updates.filter((u) => u.latest_update).length}</span
+                >
+                <span class="stat-label">Nouvelle version</span>
+            </div>
         </div>
 
-        <!-- Updates List -->
         <div class="updates-list">
-            {#each filteredUpdates as update}
+            {#each updates as update}
                 <div class="update-card card">
                     <div class="update-main">
-                        <div class="update-header">
-                            <span class="server-badge"
-                                >{update.server_name}</span
+                        <div class="update-info">
+                            <h3 class="update-name">{update.container_name}</h3>
+                            <div
+                                class="update-image font-mono text-sm text-muted"
                             >
-                            <span class="update-time text-xs text-muted">
-                                {#if update.last_checked}
-                                    Vérifié: {new Date(
-                                        update.last_checked,
-                                    ).toLocaleString("fr-FR")}
-                                {/if}
-                            </span>
+                                {update.image}
+                            </div>
+                            <div class="update-server text-xs text-muted">
+                                📦 {update.server_name}
+                            </div>
                         </div>
-                        <div class="update-name">{update.container_name}</div>
-                        <code class="update-image">{update.image}</code>
+                        <div class="update-badges">
+                            {#if update.same_tag_update}
+                                <span class="badge badge-warning">
+                                    🔄 Patch disponible
+                                </span>
+                            {/if}
+                            {#if update.latest_update}
+                                <span class="badge badge-info">
+                                    🆕 {update.latest_tag || "latest"}
+                                </span>
+                            {/if}
+                        </div>
                     </div>
-
-                    <div class="update-badges">
-                        {#if update.same_tag_update}
-                            <div class="update-badge warning">
-                                <span class="badge-icon">🔄</span>
-                                <div class="badge-content">
-                                    <div class="badge-title">
-                                        Tag mis à jour
-                                    </div>
-                                    <div class="badge-desc">
-                                        L'image a été modifiée sur le registre
-                                    </div>
-                                </div>
-                            </div>
-                        {/if}
-                        {#if update.latest_update}
-                            <div class="update-badge success">
-                                <span class="badge-icon">🆕</span>
-                                <div class="badge-content">
-                                    <div class="badge-title">
-                                        Nouvelle version
-                                    </div>
-                                    <div class="badge-desc">
-                                        Tag "{update.latest_tag || "latest"}"
-                                        disponible
-                                    </div>
-                                </div>
-                            </div>
-                        {/if}
-                    </div>
+                    {#if update.last_checked}
+                        <div class="update-checked text-xs text-muted">
+                            Vérifié: {new Date(
+                                update.last_checked,
+                            ).toLocaleString("fr-FR")}
+                        </div>
+                    {/if}
                 </div>
             {/each}
         </div>
@@ -148,6 +149,9 @@
 
 <style>
     .page-header {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
         margin-bottom: var(--spacing-xl);
     }
 
@@ -157,32 +161,36 @@
         margin-bottom: var(--spacing-xs);
     }
 
-    .filters {
-        display: flex;
-        gap: var(--spacing-sm);
-        flex-wrap: wrap;
+    .updates-summary {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: var(--spacing-md);
+        margin-bottom: var(--spacing-xl);
     }
 
-    .filter-btn {
-        padding: var(--spacing-sm) var(--spacing-md);
-        background: var(--bg-card);
-        border: 1px solid var(--border-color);
-        border-radius: var(--border-radius-sm);
+    .stat-card {
+        text-align: center;
+        padding: var(--spacing-lg);
+    }
+
+    .stat-number {
+        display: block;
+        font-size: 2.5rem;
+        font-weight: 700;
+        color: var(--color-primary);
+    }
+
+    .stat-card.warning .stat-number {
+        color: var(--color-warning);
+    }
+
+    .stat-card.info .stat-number {
+        color: var(--color-primary);
+    }
+
+    .stat-label {
         color: var(--text-secondary);
         font-size: 0.875rem;
-        cursor: pointer;
-        transition: all var(--transition-fast);
-    }
-
-    .filter-btn:hover {
-        background: var(--bg-card-hover);
-        color: var(--text-primary);
-    }
-
-    .filter-btn.active {
-        background: var(--color-primary);
-        border-color: var(--color-primary);
-        color: white;
     }
 
     .updates-list {
@@ -193,79 +201,37 @@
 
     .update-card {
         display: flex;
+        flex-direction: column;
+        gap: var(--spacing-sm);
+    }
+
+    .update-main {
+        display: flex;
         justify-content: space-between;
         align-items: flex-start;
-        gap: var(--spacing-lg);
-    }
-
-    .update-header {
-        display: flex;
-        align-items: center;
-        gap: var(--spacing-md);
-        margin-bottom: var(--spacing-sm);
-    }
-
-    .server-badge {
-        font-size: 0.75rem;
-        font-weight: 600;
-        text-transform: uppercase;
-        letter-spacing: 0.5px;
-        color: var(--color-primary);
-        background: rgba(102, 126, 234, 0.15);
-        padding: 2px 8px;
-        border-radius: 4px;
     }
 
     .update-name {
-        font-size: 1.25rem;
+        font-size: 1.125rem;
         font-weight: 600;
         margin-bottom: var(--spacing-xs);
     }
 
-    .update-image {
-        font-size: 0.875rem;
-        background: var(--bg-primary);
-        padding: 4px 8px;
-        border-radius: 4px;
-    }
-
     .update-badges {
         display: flex;
-        flex-direction: column;
         gap: var(--spacing-sm);
-        min-width: 250px;
+        flex-shrink: 0;
+        align-items: flex-start;
     }
 
-    .update-badge {
-        display: flex;
-        align-items: center;
-        gap: var(--spacing-sm);
-        padding: var(--spacing-sm) var(--spacing-md);
-        border-radius: var(--border-radius-sm);
+    .update-badges .badge {
+        cursor: pointer;
+        width: fit-content;
+        transition: opacity 0.15s ease;
     }
 
-    .update-badge.warning {
-        background: rgba(237, 137, 54, 0.15);
-        border: 1px solid rgba(237, 137, 54, 0.3);
-    }
-
-    .update-badge.success {
-        background: rgba(72, 187, 120, 0.15);
-        border: 1px solid rgba(72, 187, 120, 0.3);
-    }
-
-    .badge-icon {
-        font-size: 1.25rem;
-    }
-
-    .badge-title {
-        font-weight: 600;
-        font-size: 0.875rem;
-    }
-
-    .badge-desc {
-        font-size: 0.75rem;
-        color: var(--text-secondary);
+    .update-badges .badge:hover {
+        opacity: 0.8;
     }
 
     .empty-state {
@@ -274,18 +240,18 @@
     }
 
     .empty-icon {
-        font-size: 4rem;
+        font-size: 3rem;
         margin-bottom: var(--spacing-md);
     }
 
     @media (max-width: 768px) {
-        .update-card {
-            flex-direction: column;
+        .updates-summary {
+            grid-template-columns: 1fr;
         }
 
-        .update-badges {
-            width: 100%;
-            min-width: 0;
+        .update-main {
+            flex-direction: column;
+            gap: var(--spacing-md);
         }
     }
 </style>

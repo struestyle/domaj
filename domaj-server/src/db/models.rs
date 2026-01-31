@@ -95,10 +95,13 @@ pub struct UpdateSummary {
     pub container_id: i64,
     pub container_name: String,
     pub image: String,
+    pub image_digest: Option<String>,
     pub server_name: String,
     pub same_tag_update: bool,
+    pub same_tag_digest: Option<String>,
     pub latest_update: bool,
     pub latest_tag: Option<String>,
+    pub latest_digest: Option<String>,
     pub last_checked: Option<DateTime<Utc>>,
 }
 

@@ -122,9 +122,12 @@ async fn get_pending_updates(state: &AppState) -> Result<Vec<UpdateSummary>> {
             .filter(|c| c.container_id == container.id)
             .collect();
 
-        let same_tag_update = container_checks
+        let same_tag_check = container_checks
             .iter()
-            .any(|c| c.check_type == "same_tag" && c.has_update);
+            .find(|c| c.check_type == "same_tag" && c.has_update);
+
+        let same_tag_update = same_tag_check.is_some();
+        let same_tag_digest = same_tag_check.and_then(|c| c.remote_digest.clone());
 
         let latest_check = container_checks
             .iter()
@@ -132,6 +135,7 @@ async fn get_pending_updates(state: &AppState) -> Result<Vec<UpdateSummary>> {
 
         let latest_update = latest_check.is_some();
         let latest_tag = latest_check.and_then(|c| c.latest_tag.clone());
+        let latest_digest = latest_check.and_then(|c| c.remote_digest.clone());
 
         let last_checked = container_checks
             .iter()
@@ -143,10 +147,13 @@ async fn get_pending_updates(state: &AppState) -> Result<Vec<UpdateSummary>> {
                 container_id: container.id,
                 container_name: container.name,
                 image: container.image,
+                image_digest: container.image_digest,
                 server_name: server_map.get(&container.server_id).cloned().unwrap_or_default(),
                 same_tag_update,
+                same_tag_digest,
                 latest_update,
                 latest_tag,
+                latest_digest,
                 last_checked,
             });
         }

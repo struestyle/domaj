@@ -124,7 +124,7 @@ async fn sync_server_containers(state: &AppState, server: &Server) -> Result<()>
     
     let response = client
         .get(&agent_url)
-        .header("X-API-Key", &server.api_key)
+        .header("X-API-Key", &state.config.api_secret)
         .send()
         .await?;
 

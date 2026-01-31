@@ -20,7 +20,20 @@
   <nav class="navbar">
     <div class="container navbar-content">
       <a href="/" class="logo">
-        <span class="logo-icon">🐳</span>
+        <span class="logo-icon">
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+          >
+            <path
+              d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"
+            ></path>
+            <polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline>
+            <line x1="12" y1="22.08" x2="12" y2="12"></line>
+          </svg>
+        </span>
         <span class="logo-text">Domaj</span>
       </a>
 
@@ -32,7 +45,16 @@
 
       <div class="nav-actions">
         <button class="btn btn-primary" on:click={triggerScan}>
-          <span>🔍</span>
+          <svg
+            class="btn-icon"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+          >
+            <circle cx="11" cy="11" r="8"></circle>
+            <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+          </svg>
           Scanner
         </button>
       </div>
@@ -83,7 +105,16 @@
   }
 
   .logo-icon {
-    font-size: 2rem;
+    width: 32px;
+    height: 32px;
+    display: flex;
+    align-items: center;
+  }
+
+  .logo-icon svg {
+    width: 28px;
+    height: 28px;
+    stroke: var(--color-primary);
   }
 
   .logo-text {
@@ -95,6 +126,13 @@
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
     background-clip: text;
+  }
+
+  .btn-icon {
+    width: 16px;
+    height: 16px;
+    margin-right: 6px;
+    vertical-align: middle;
   }
 
   .nav-links {
