@@ -1,0 +1,32 @@
+# Build artifacts
+/target/
+/domaj-server/target/
+/domaj-agent/target/
+
+# Node
+/domaj-web/node_modules/
+/domaj-web/build/
+/domaj-web/.svelte-kit/
+
+# Environment
+.env
+.env.local
+
+# Database
+*.db
+*.db-shm
+*.db-wal
+/data/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
