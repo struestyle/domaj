@@ -1,0 +1,48 @@
+services:
+  server:
+    build: 
+      context: ./domaj-server
+      dockerfile: Dockerfile
+    container_name: domaj-server
+    ports:
+      - "${SERVER_PORT:-3000}:3000"
+    environment:
+      - DATABASE_URL=sqlite:/data/domaj.db?mode=rwc
+      - PORT=3000
+      - SCAN_INTERVAL=${SCAN_INTERVAL:-0 0 * * *}
+      - API_SECRET=${API_SECRET:-change-me-in-production}
+      - SMTP_HOST=${SMTP_HOST:-}
+      - SMTP_PORT=${SMTP_PORT:-587}
+      - SMTP_USER=${SMTP_USER:-}
+      - SMTP_PASSWORD=${SMTP_PASSWORD:-}
+      - SMTP_FROM=${SMTP_FROM:-}
+      - NOTIFY_EMAILS=${NOTIFY_EMAILS:-}
+      - RUST_LOG=${RUST_LOG:-domaj_server=info,tower_http=debug}
+    volumes:
+      - domaj-data:/data
+    restart: unless-stopped
+    networks:
+      - domaj-network
+
+  web:
+    build:
+      context: ./domaj-web
+      dockerfile: Dockerfile
+    container_name: domaj-web
+    ports:
+      - "${WEB_PORT:-8080}:80"
+    environment:
+      - API_URL=http://server:3000
+    depends_on:
+      - server
+    restart: unless-stopped
+    networks:
+      - domaj-network
+
+volumes:
+  domaj-data:
+    driver: local
+
+networks:
+  domaj-network:
+    driver: bridge

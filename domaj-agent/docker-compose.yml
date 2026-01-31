@@ -1,0 +1,17 @@
+# Domaj Agent - Docker Compose
+# Deploy this on each server you want to monitor
+
+services:
+  agent:
+    build: .
+    image: domaj-agent:latest
+    container_name: domaj-agent
+    restart: unless-stopped
+    ports:
+      - "${AGENT_PORT:-3002}:3001"
+    environment:
+      - API_KEY=${API_KEY:-change-me-in-production}
+      - RUST_LOG=${RUST_LOG:-domaj_agent=info}
+    volumes:
+      # Read-only access to Docker socket
+      - /var/run/docker.sock:/var/run/docker.sock:ro

@@ -1,0 +1,60 @@
+# Domaj - Roadmap
+
+## Version 1.0 (MVP) - En cours
+- [x] Interface web avec liste des conteneurs par serveur
+- [x] Comparaison d'images (hash digest same tag)
+- [x] Comparaison avec latest tag
+- [x] Notifications par email (rapport périodique)
+- [x] Agent distant léger
+- [x] Déploiement Docker Compose
+
+## Version 1.1 - Notifications Avancées
+- [ ] Intégration Telegram (teloxide)
+- [ ] Intégration Discord (serenity/webhook)
+- [ ] Intégration Slack (webhook)
+- [ ] WhatsApp Business API (si demandé)
+
+## Version 1.2 - Registres Privés & Database
+- [ ] Support PostgreSQL comme base de données externe
+- [ ] Migration SQLite vers PostgreSQL
+- [ ] Support Harbor
+- [ ] Support GitLab Container Registry
+- [ ] Support AWS ECR
+- [ ] Support Azure ACR
+- [ ] Support Google Artifact Registry
+- [ ] Gestion des credentials par registre
+
+## Version 1.3 - Actions Automatiques
+- [ ] Déclenchement de mise à jour depuis l'interface
+- [ ] Pull automatique d'images
+- [ ] Restart de conteneurs
+- [ ] Rollback vers version précédente
+- [ ] Dry-run mode (simulation)
+
+## Version 1.4 - Authentification Avancée
+- [ ] Support OIDC/OAuth2
+- [ ] Intégration Keycloak
+- [ ] Intégration Auth0
+- [ ] Gestion des rôles (admin/viewer)
+- [ ] Audit logs des actions
+
+## Version 2.0 - Sécurité & Observabilité
+- [ ] Scan CVE avec Trivy
+- [ ] Dashboard de vulnérabilités
+- [ ] Agrégation des changelogs entre versions
+- [ ] Métriques Prometheus
+- [ ] Health checks avancés
+- [ ] Alertes sur conteneurs unhealthy
+
+## Version 2.1 - Organisation
+- [ ] Groupes logiques (prod/staging/dev)
+- [ ] Tags personnalisés sur conteneurs
+- [ ] Filtres et recherche avancée
+- [ ] Export des rapports (PDF/CSV)
+
+## Idées Futures
+- Support Kubernetes (pods, deployments)
+- Support Podman
+- API publique pour intégrations tierces
+- Mobile app (notifications push)
+- Backup automatique des docker-compose avant mise à jour
