@@ -53,6 +53,9 @@ async fn main() -> anyhow::Result<()> {
     let db = db::init_db(&config.database_url).await?;
     tracing::info!("💾 Database initialized");
 
+    // Setup admin account from environment variables if configured
+    setup_admin_account(&db, &config).await?;
+
     // Initialize scheduler
     let scheduler = Arc::new(RwLock::new(Scheduler::new()));
 
@@ -88,5 +91,60 @@ async fn main() -> anyhow::Result<()> {
     )
     .await?;
 
+    Ok(())
+}
+
+/// Setup admin account from environment variables if configured
+async fn setup_admin_account(db: &sqlx::SqlitePool, config: &Config) -> anyhow::Result<()> {
+    use argon2::{
+        password_hash::{rand_core::OsRng, PasswordHasher, SaltString},
+        Argon2,
+    };
+
+    // Check if admin credentials are configured
+    let (username, password) = match (&config.admin_username, &config.admin_password) {
+        (Some(u), Some(p)) => (u, p),
+        _ => return Ok(()), // No admin configured, skip
+    };
+
+    // Validate credentials
+    if username.len() < 3 {
+        tracing::warn!("⚠️  ADMIN_USERNAME must be at least 3 characters, skipping admin setup");
+        return Ok(());
+    }
+    if password.len() < 6 {
+        tracing::warn!("⚠️  ADMIN_PASSWORD must be at least 6 characters, skipping admin setup");
+        return Ok(());
+    }
+
+    // Check if admin user already exists
+    let existing: Option<(i64,)> = sqlx::query_as("SELECT id FROM users WHERE username = ?")
+        .bind(username)
+        .fetch_optional(db)
+        .await?;
+
+    if existing.is_some() {
+        tracing::info!("👤 Admin account '{}' already exists", username);
+        return Ok(());
+    }
+
+    // Hash password
+    let salt = SaltString::generate(&mut OsRng);
+    let argon2 = Argon2::default();
+    let password_hash = argon2
+        .hash_password(password.as_bytes(), &salt)
+        .map_err(|e| anyhow::anyhow!("Failed to hash password: {}", e))?
+        .to_string();
+
+    // Create admin user
+    sqlx::query(
+        "INSERT INTO users (username, password_hash, role) VALUES (?, ?, 'admin')"
+    )
+    .bind(username)
+    .bind(&password_hash)
+    .execute(db)
+    .await?;
+
+    tracing::info!("✅ Admin account '{}' created successfully", username);
     Ok(())
 }

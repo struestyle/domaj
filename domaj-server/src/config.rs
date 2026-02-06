@@ -22,6 +22,10 @@ pub struct Config {
     /// JWT secret for user authentication
     pub jwt_secret: String,
     
+    // Admin account configuration (optional, for initial setup)
+    pub admin_username: Option<String>,
+    pub admin_password: Option<String>,
+    
     // SMTP Configuration
     pub smtp_host: Option<String>,
     pub smtp_port: u16,
@@ -75,12 +79,18 @@ impl Config {
             .filter(|s| !s.is_empty())
             .collect();
         
+        // Admin account configuration (optional)
+        let admin_username = std::env::var("ADMIN_USERNAME").ok();
+        let admin_password = std::env::var("ADMIN_PASSWORD").ok();
+        
         Ok(Self {
             database_url,
             port,
             scan_interval,
             api_secret,
             jwt_secret,
+            admin_username,
+            admin_password,
             smtp_host,
             smtp_port,
             smtp_user,
