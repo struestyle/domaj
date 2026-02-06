@@ -2,6 +2,7 @@
     import { onMount } from "svelte";
     import { page } from "$app/stores";
     import { getServer, getServerContainers, syncServer } from "$lib/api.js";
+    import { toasts } from "$lib/stores/toast.js";
 
     let server = null;
     let containers = [];
@@ -35,7 +36,7 @@
             containers = await syncServer(serverId);
             server = await getServer(serverId);
         } catch (e) {
-            alert("Erreur: " + e.message);
+            toasts.error("Erreur: " + e.message);
         } finally {
             syncing = false;
         }

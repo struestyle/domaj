@@ -1,17 +1,19 @@
 <script>
   import "../app.css";
+  import Toast from "$lib/components/Toast.svelte";
+  import { toasts } from "$lib/stores/toast.js";
 
   async function triggerScan() {
     try {
       const response = await fetch("/api/scan", { method: "POST" });
       if (response.ok) {
-        alert("Scan lancé en arrière-plan");
+        toasts.success("Scan lancé en arrière-plan");
       } else {
-        alert("Erreur lors du lancement du scan");
+        toasts.error("Erreur lors du lancement du scan");
       }
     } catch (error) {
       console.error("Scan error:", error);
-      alert("Erreur de connexion au serveur");
+      toasts.error("Erreur de connexion au serveur");
     }
   }
 </script>
@@ -70,6 +72,8 @@
     </div>
   </footer>
 </div>
+
+<Toast />
 
 <style>
   .app {

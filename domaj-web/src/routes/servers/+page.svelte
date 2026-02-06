@@ -7,6 +7,7 @@
         syncServer,
         updateServer,
     } from "$lib/api.js";
+    import { toasts } from "$lib/stores/toast.js";
 
     let servers = [];
     let loading = true;
@@ -44,7 +45,7 @@
             newServer = { name: "", endpoint: "" };
             showAddForm = false;
         } catch (e) {
-            alert("Erreur: " + e.message);
+            toasts.error("Erreur: " + e.message);
         } finally {
             submitting = false;
         }
@@ -57,17 +58,17 @@
             await deleteServer(id);
             servers = servers.filter((s) => s.id !== id);
         } catch (e) {
-            alert("Erreur: " + e.message);
+            toasts.error("Erreur: " + e.message);
         }
     }
 
     async function handleSyncServer(id) {
         try {
             await syncServer(id);
-            alert("Synchronisation lancée");
+            toasts.success("Synchronisation lancée");
             await loadServers();
         } catch (e) {
-            alert("Erreur de synchronisation: " + e.message);
+            toasts.error("Erreur de synchronisation: " + e.message);
         }
     }
 
@@ -90,7 +91,7 @@
             servers = servers.map((s) => (s.id === updated.id ? updated : s));
             cancelEdit();
         } catch (e) {
-            alert("Erreur: " + e.message);
+            toasts.error("Erreur: " + e.message);
         } finally {
             submitting = false;
         }
