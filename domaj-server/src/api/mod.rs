@@ -4,7 +4,6 @@
 
 pub mod auth;
 mod containers;
-pub mod rate_limit;
 mod servers;
 mod websocket;
 
@@ -14,15 +13,41 @@ use axum::{
     routing::{get, post, delete, put},
     Router,
 };
+use tower_governor::{
+    governor::GovernorConfigBuilder,
+    GovernorLayer,
+};
 
 use crate::AppState;
 
 /// Build the API router with all endpoints
 pub fn router(jwt_secret: String) -> Router<Arc<AppState>> {
-    // Public auth routes (no authentication required)
+    // Rate limiting config: 5 requests per 60 seconds per IP
+    let governor_conf = Arc::new(
+        GovernorConfigBuilder::default()
+            .per_second(60)
+            .burst_size(5)
+            .finish()
+            .expect("Invalid governor config")
+    );
+    
+    let governor_limiter = governor_conf.limiter().clone();
+    
+    // Spawn cleanup task for rate limiter
+    tokio::spawn(async move {
+        loop {
+            tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+            governor_limiter.retain_recent();
+        }
+    });
+    
+    // Public auth routes with rate limiting (no JWT required)
     let auth_routes = Router::new()
         .route("/auth/register", post(auth::register))
-        .route("/auth/login", post(auth::login));
+        .route("/auth/login", post(auth::login))
+        .layer(GovernorLayer {
+            config: governor_conf,
+        });
     
     // Protected routes (require JWT authentication)
     let protected_routes = Router::new()
@@ -68,4 +93,5 @@ async fn status() -> axum::Json<serde_json::Value> {
         "version": env!("CARGO_PKG_VERSION"),
     }))
 }
+
 
