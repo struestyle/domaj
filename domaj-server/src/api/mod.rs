@@ -2,12 +2,14 @@
 //!
 //! RESTful API endpoints for managing servers, containers, and updates.
 
+pub mod auth;
 mod containers;
 mod servers;
 mod websocket;
 
 use std::sync::Arc;
 use axum::{
+    middleware,
     routing::{get, post, delete, put},
     Router,
 };
@@ -15,8 +17,17 @@ use axum::{
 use crate::AppState;
 
 /// Build the API router with all endpoints
-pub fn router() -> Router<Arc<AppState>> {
-    Router::new()
+pub fn router(jwt_secret: String) -> Router<Arc<AppState>> {
+    // Public auth routes (no authentication required)
+    let auth_routes = Router::new()
+        .route("/auth/register", post(auth::register))
+        .route("/auth/login", post(auth::login));
+    
+    // Protected routes (require JWT authentication)
+    let protected_routes = Router::new()
+        // Auth - get current user
+        .route("/auth/me", get(auth::me))
+        
         // Server management
         .route("/servers", get(servers::list_servers))
         .route("/servers", post(servers::create_server))
@@ -43,6 +54,10 @@ pub fn router() -> Router<Arc<AppState>> {
         
         // WebSocket for real-time updates
         .route("/ws", get(websocket::ws_handler))
+        .layer(middleware::from_fn_with_state(jwt_secret, auth::auth_middleware));
+    
+    // Combine public and protected routes
+    auth_routes.merge(protected_routes)
 }
 
 /// System status endpoint
@@ -52,3 +67,4 @@ async fn status() -> axum::Json<serde_json::Value> {
         "version": env!("CARGO_PKG_VERSION"),
     }))
 }
+

@@ -19,6 +19,9 @@ pub struct Config {
     /// API secret for authenticating agents
     pub api_secret: String,
     
+    /// JWT secret for user authentication
+    pub jwt_secret: String,
+    
     // SMTP Configuration
     pub smtp_host: Option<String>,
     pub smtp_port: u16,
@@ -50,6 +53,12 @@ impl Config {
                 "change-me-in-production".to_string()
             });
         
+        let jwt_secret = std::env::var("JWT_SECRET")
+            .unwrap_or_else(|_| {
+                tracing::warn!("⚠️  JWT_SECRET not set, using default (insecure for production!)");
+                "jwt-secret-change-me-in-production-32chars".to_string()
+            });
+        
         let smtp_host = std::env::var("SMTP_HOST").ok();
         let smtp_port = std::env::var("SMTP_PORT")
             .unwrap_or_else(|_| "587".to_string())
@@ -71,6 +80,7 @@ impl Config {
             port,
             scan_interval,
             api_secret,
+            jwt_secret,
             smtp_host,
             smtp_port,
             smtp_user,

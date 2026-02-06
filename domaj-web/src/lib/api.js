@@ -1,12 +1,23 @@
+import { getToken } from './stores/auth.js';
+
 const API_BASE = '/api';
 
 export async function fetchApi(endpoint, options = {}) {
     const url = `${API_BASE}${endpoint}`;
+    const token = getToken();
+
+    const headers = {
+        'Content-Type': 'application/json',
+        ...options.headers
+    };
+
+    // Add Authorization header if token exists
+    if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+    }
+
     const response = await fetch(url, {
-        headers: {
-            'Content-Type': 'application/json',
-            ...options.headers
-        },
+        headers,
         ...options
     });
 

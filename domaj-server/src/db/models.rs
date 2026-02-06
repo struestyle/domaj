@@ -4,6 +4,37 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
 
+/// A registered user
+#[derive(Debug, Clone, Serialize, FromRow)]
+pub struct User {
+    pub id: i64,
+    pub username: String,
+    #[serde(skip_serializing)]
+    pub password_hash: String,
+    pub role: String,
+    pub created_at: DateTime<Utc>,
+}
+
+/// User response without password hash
+#[derive(Debug, Serialize)]
+pub struct UserResponse {
+    pub id: i64,
+    pub username: String,
+    pub role: String,
+    pub created_at: DateTime<Utc>,
+}
+
+impl From<User> for UserResponse {
+    fn from(user: User) -> Self {
+        Self {
+            id: user.id,
+            username: user.username,
+            role: user.role,
+            created_at: user.created_at,
+        }
+    }
+}
+
 /// A registered server with a Domaj agent
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
 pub struct Server {
