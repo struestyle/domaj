@@ -5,6 +5,7 @@
         getContainers,
         getUpdates,
         getStatus,
+        updateContainer,
     } from "$lib/api.js";
 
     let servers = [];
@@ -17,6 +18,8 @@
     let sortColumn = "container_name";
     let sortDirection = "asc";
     let copiedId = null;
+    let updatingContainer = null;
+    let updateError = null;
 
     onMount(async () => {
         try {
@@ -90,6 +93,39 @@
         if (!digest) return "N/A";
         // Show short version: sha256:abc123...
         return digest.length > 20 ? digest.substring(0, 20) + "..." : digest;
+    }
+
+    async function handleUpdate(update, type) {
+        const containerId = update.container_id;
+        updateError = null;
+        updatingContainer = `${containerId}-${type}`;
+
+        try {
+            // Determine target tag based on update type
+            let targetTag = null;
+            if (type === "patch") {
+                // Same tag update: re-pull current tag
+                const currentTag = update.image.split(":")[1] || "latest";
+                targetTag = currentTag;
+            } else if (type === "latest") {
+                // Latest update: use the latest tag discovered
+                targetTag = update.latest_tag || "latest";
+            }
+
+            await updateContainer(containerId, targetTag);
+
+            // Remove the update from the list on success
+            updates = updates.filter((u) => u.container_id !== containerId);
+
+            // Refresh data
+            updates = await getUpdates();
+            stats = await getStats();
+        } catch (err) {
+            updateError = err.message;
+            console.error("Update failed:", err);
+        } finally {
+            updatingContainer = null;
+        }
     }
 </script>
 
@@ -286,6 +322,7 @@
                                         : ""}
                                 </th>
                                 <th>Tag disponible</th>
+                                <th>Actions</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -455,6 +492,47 @@
                                             </span>
                                         {:else}
                                             <span class="text-muted">—</span>
+                                        {/if}
+                                    </td>
+                                    <td class="actions-cell">
+                                        {#if update.same_tag_update}
+                                            <button
+                                                class="btn btn-sm btn-warning"
+                                                disabled={updatingContainer !==
+                                                    null}
+                                                on:click={() =>
+                                                    handleUpdate(
+                                                        update,
+                                                        "patch",
+                                                    )}
+                                            >
+                                                {#if updatingContainer === `${update.container_id}-patch`}
+                                                    <span class="spinner"
+                                                    ></span>
+                                                {:else}
+                                                    Patch
+                                                {/if}
+                                            </button>
+                                        {/if}
+                                        {#if update.latest_update}
+                                            <button
+                                                class="btn btn-sm btn-success"
+                                                disabled={updatingContainer !==
+                                                    null}
+                                                on:click={() =>
+                                                    handleUpdate(
+                                                        update,
+                                                        "latest",
+                                                    )}
+                                            >
+                                                {#if updatingContainer === `${update.container_id}-latest`}
+                                                    <span class="spinner"
+                                                    ></span>
+                                                {:else}
+                                                    {update.latest_tag ||
+                                                        "latest"}
+                                                {/if}
+                                            </button>
                                         {/if}
                                     </td>
                                 </tr>
@@ -715,5 +793,64 @@
             rgba(245, 101, 101, 0.1) 0%,
             transparent 100%
         );
+    }
+
+    .actions-cell {
+        display: flex;
+        gap: 0.5rem;
+        flex-wrap: wrap;
+    }
+
+    .btn-sm {
+        padding: 0.25rem 0.5rem;
+        font-size: 0.75rem;
+        border-radius: 4px;
+        border: none;
+        cursor: pointer;
+        font-weight: 500;
+        transition: all 0.15s ease;
+        display: inline-flex;
+        align-items: center;
+        gap: 0.25rem;
+        min-width: 60px;
+        justify-content: center;
+    }
+
+    .btn-sm:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+    }
+
+    .btn-warning {
+        background-color: var(--color-warning);
+        color: #000;
+    }
+
+    .btn-warning:hover:not(:disabled) {
+        background-color: #d97706;
+    }
+
+    .btn-success {
+        background-color: var(--color-success);
+        color: #fff;
+    }
+
+    .btn-success:hover:not(:disabled) {
+        background-color: #059669;
+    }
+
+    .spinner {
+        width: 12px;
+        height: 12px;
+        border: 2px solid currentColor;
+        border-top-color: transparent;
+        border-radius: 50%;
+        animation: spin 0.8s linear infinite;
+    }
+
+    @keyframes spin {
+        to {
+            transform: rotate(360deg);
+        }
     }
 </style>

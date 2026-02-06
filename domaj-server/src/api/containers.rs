@@ -199,3 +199,85 @@ pub async fn trigger_scan(
         "message": "Scan triggered in background"
     })))
 }
+
+/// Request body for container update
+#[derive(serde::Deserialize)]
+pub struct UpdateContainerRequest {
+    /// Optional target tag to update to
+    pub target_tag: Option<String>,
+}
+
+/// Update a container via its agent
+pub async fn update_container(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<i64>,
+    Json(body): Json<UpdateContainerRequest>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    // Get container info
+    let container: Container = sqlx::query_as("SELECT * FROM containers WHERE id = ?")
+        .bind(id)
+        .fetch_optional(&state.db)
+        .await
+        .map_err(|e| {
+            tracing::error!("Failed to fetch container: {}", e);
+            (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": "Database error"})))
+        })?
+        .ok_or_else(|| (StatusCode::NOT_FOUND, Json(serde_json::json!({"error": "Container not found"}))))?;
+
+    // Get the server this container belongs to
+    let server: crate::db::Server = sqlx::query_as("SELECT * FROM servers WHERE id = ?")
+        .bind(container.server_id)
+        .fetch_optional(&state.db)
+        .await
+        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": "Database error"}))))?
+        .ok_or_else(|| (StatusCode::NOT_FOUND, Json(serde_json::json!({"error": "Server not found"}))))?;
+
+    tracing::info!(
+        "🔄 Requesting update for container {} on {} (target_tag: {:?})",
+        container.name,
+        server.name,
+        body.target_tag
+    );
+
+    // Send update request to agent
+    let client = reqwest::Client::new();
+    let agent_url = format!(
+        "{}/containers/{}/update",
+        server.endpoint.trim_end_matches('/'),
+        container.name
+    );
+
+    let response = client
+        .post(&agent_url)
+        .header("X-API-Key", &state.config.api_secret)
+        .json(&serde_json::json!({
+            "target_tag": body.target_tag
+        }))
+        .send()
+        .await
+        .map_err(|e| {
+            tracing::error!("Failed to contact agent: {}", e);
+            (StatusCode::BAD_GATEWAY, Json(serde_json::json!({
+                "error": format!("Failed to contact agent: {}", e)
+            })))
+        })?;
+
+    if !response.status().is_success() {
+        let status = response.status();
+        let error_body = response.json::<serde_json::Value>().await.unwrap_or_default();
+        tracing::error!("Agent returned error: {} - {:?}", status, error_body);
+        return Err((StatusCode::BAD_GATEWAY, Json(serde_json::json!({
+            "error": error_body.get("error").and_then(|e| e.as_str()).unwrap_or("Agent error"),
+            "details": error_body
+        }))));
+    }
+
+    let result: serde_json::Value = response.json().await.map_err(|e| {
+        tracing::error!("Failed to parse agent response: {}", e);
+        (StatusCode::BAD_GATEWAY, Json(serde_json::json!({"error": "Invalid agent response"})))
+    })?;
+
+    tracing::info!("✅ Container {} updated successfully", container.name);
+
+    Ok(Json(result))
+}

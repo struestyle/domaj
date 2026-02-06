@@ -9,9 +9,10 @@ use std::sync::Arc;
 use axum::{
     extract::State,
     http::{HeaderMap, StatusCode},
-    routing::get,
+    routing::{get, post},
     Json, Router,
 };
+use serde::Deserialize;
 use tower_http::trace::TraceLayer;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 use uuid::Uuid;
@@ -113,6 +114,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/info", get(info))
         .route("/containers", get(list_containers))
         .route("/containers/:id", get(get_container))
+        .route("/containers/:name/update", post(update_container))
         .layer(TraceLayer::new_for_http())
         .with_state(state);
 
@@ -193,5 +195,45 @@ async fn get_container(
     match container {
         Some(c) => Ok(Json(c)),
         None => Err(StatusCode::NOT_FOUND),
+    }
+}
+
+/// Request body for container update
+#[derive(Debug, Deserialize)]
+pub struct UpdateRequest {
+    /// Optional target tag to update to
+    pub target_tag: Option<String>,
+}
+
+/// Update a container to a new image
+async fn update_container(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    axum::extract::Path(name): axum::extract::Path<String>,
+    Json(body): Json<UpdateRequest>,
+) -> Result<Json<docker::UpdateResult>, (StatusCode, Json<serde_json::Value>)> {
+    check_api_key(&headers, &state.config.api_key)
+        .map_err(|_| (StatusCode::UNAUTHORIZED, Json(serde_json::json!({"error": "Unauthorized"}))))?;
+    
+    tracing::info!("🔄 Received update request for container '{}' (target_tag: {:?})", name, body.target_tag);
+    
+    let result = state.docker
+        .update_container(&name, body.target_tag.as_deref())
+        .await
+        .map_err(|e| {
+            tracing::error!("Failed to update container {}: {}", name, e);
+            (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({
+                "error": format!("Failed to update container: {}", e)
+            })))
+        })?;
+    
+    if result.success {
+        Ok(Json(result))
+    } else {
+        Err((StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({
+            "error": result.message,
+            "old_image": result.old_image,
+            "new_image": result.new_image
+        }))))
     }
 }

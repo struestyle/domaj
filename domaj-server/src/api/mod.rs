@@ -30,6 +30,7 @@ pub fn router() -> Router<Arc<AppState>> {
         .route("/containers", get(containers::list_containers))
         .route("/containers/:id", get(containers::get_container))
         .route("/containers/:id/updates", get(containers::get_container_updates))
+        .route("/containers/:id/update", post(containers::update_container))
         
         // Updates overview
         .route("/updates", get(containers::list_updates))

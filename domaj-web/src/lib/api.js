@@ -82,3 +82,10 @@ export async function triggerScan() {
 export async function getStatus() {
     return fetchApi('/status');
 }
+
+export async function updateContainer(containerId, targetTag = null) {
+    return fetchApi(`/containers/${containerId}/update`, {
+        method: 'POST',
+        body: JSON.stringify({ target_tag: targetTag })
+    });
+}
