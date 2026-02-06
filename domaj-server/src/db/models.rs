@@ -32,6 +32,7 @@ pub struct Container {
     pub name: String,
     pub image: String,
     pub image_digest: Option<String>,
+    pub architecture: Option<String>,
     pub status: String,
     pub created_at: DateTime<Utc>,
     pub last_checked: Option<DateTime<Utc>>,

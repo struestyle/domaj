@@ -138,6 +138,7 @@ async fn sync_server_containers(state: &AppState, server: &Server) -> Result<()>
         name: String,
         image: String,
         image_digest: Option<String>,
+        architecture: Option<String>,
         status: String,
     }
 
@@ -151,13 +152,14 @@ async fn sync_server_containers(state: &AppState, server: &Server) -> Result<()>
 
     for c in &agent_containers {
         sqlx::query(
-            "INSERT INTO containers (server_id, container_id, name, image, image_digest, status) VALUES (?, ?, ?, ?, ?, ?)",
+            "INSERT INTO containers (server_id, container_id, name, image, image_digest, architecture, status) VALUES (?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(server.id)
         .bind(&c.id)
         .bind(&c.name)
         .bind(&c.image)
         .bind(&c.image_digest)
+        .bind(&c.architecture)
         .bind(&c.status)
         .execute(&state.db)
         .await?;

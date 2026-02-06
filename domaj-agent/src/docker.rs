@@ -24,6 +24,8 @@ pub struct ContainerInfo {
     pub image: String,
     /// Image digest (sha256:...)
     pub image_digest: Option<String>,
+    /// Image architecture (e.g., "amd64", "arm64")
+    pub architecture: Option<String>,
     /// Container status (e.g., "running", "exited")
     pub status: String,
     /// Container state (e.g., "running", "exited")
@@ -93,24 +95,25 @@ impl DockerClient {
 
             let image = c.image.clone().unwrap_or_default();
             
-            // Get the RepoDigest (registry manifest digest) instead of image_id
-            let image_digest = if let Some(image_id) = &c.image_id {
-                // Inspect the image to get RepoDigests
+            // Get the RepoDigest and architecture from image inspection
+            let (image_digest, architecture) = if let Some(image_id) = &c.image_id {
                 match self.docker.inspect_image(image_id).await {
                     Ok(inspect) => {
                         // RepoDigests contains entries like "postgres@sha256:1090bc3a..."
-                        // Extract the digest part
-                        inspect.repo_digests
+                        let digest = inspect.repo_digests
                             .and_then(|digests| {
                                 digests.first().and_then(|d| {
                                     d.split('@').nth(1).map(|s| s.to_string())
                                 })
-                            })
+                            });
+                        // Get architecture from image inspection
+                        let arch = inspect.architecture;
+                        (digest, arch)
                     }
-                    Err(_) => c.image_id.clone(), // Fallback to image_id if inspection fails
+                    Err(_) => (c.image_id.clone(), None), // Fallback
                 }
             } else {
-                None
+                (None, None)
             };
             
             let status = c.status.unwrap_or_default();
@@ -137,6 +140,7 @@ impl DockerClient {
                 name,
                 image,
                 image_digest,
+                architecture,
                 status,
                 state,
                 created,

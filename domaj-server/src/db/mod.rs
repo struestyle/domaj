@@ -68,6 +68,7 @@ async fn run_migrations(pool: &SqlitePool) -> Result<()> {
             name TEXT NOT NULL,
             image TEXT NOT NULL,
             image_digest TEXT,
+            architecture TEXT,
             status TEXT NOT NULL,
             created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
             last_checked DATETIME,
@@ -77,6 +78,12 @@ async fn run_migrations(pool: &SqlitePool) -> Result<()> {
     )
     .execute(pool)
     .await?;
+
+    // Add architecture column if it doesn't exist (migration for existing databases)
+    sqlx::query("ALTER TABLE containers ADD COLUMN architecture TEXT")
+        .execute(pool)
+        .await
+        .ok(); // Ignore error if column already exists
 
     sqlx::query(
         r#"

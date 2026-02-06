@@ -68,13 +68,14 @@ impl RegistryClientDyn for DockerHubClient {
                 repo, tag
             );
             
+            // Request manifest list (multi-arch) or fallback to single manifest
             let resp = self
                 .client
                 .get(&url)
                 .header("Authorization", format!("Bearer {}", token))
                 .header(
                     "Accept",
-                    "application/vnd.docker.distribution.manifest.v2+json",
+                    "application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.docker.distribution.manifest.v2+json",
                 )
                 .send()
                 .await
@@ -86,14 +87,50 @@ impl RegistryClientDyn for DockerHubClient {
                 anyhow::bail!("Docker Hub returned {}: {}", status, body);
             }
 
-            let digest = resp
-                .headers()
-                .get("docker-content-digest")
+            let content_type = resp.headers()
+                .get("content-type")
                 .and_then(|v| v.to_str().ok())
-                .map(|s| s.to_string())
-                .ok_or_else(|| anyhow::anyhow!("Docker-Content-Digest header not found"))?;
+                .unwrap_or("");
+            
+            // Check if this is a manifest list (multi-arch)
+            if content_type.contains("manifest.list") || content_type.contains("image.index") {
+                // Parse the manifest list and find the amd64/linux digest
+                let body: serde_json::Value = resp.json().await?;
+                
+                if let Some(manifests) = body["manifests"].as_array() {
+                    // Try to find linux/amd64 manifest (most common)
+                    for manifest in manifests {
+                        let platform = &manifest["platform"];
+                        let os = platform["os"].as_str().unwrap_or("");
+                        let arch = platform["architecture"].as_str().unwrap_or("");
+                        
+                        if os == "linux" && arch == "amd64" {
+                            if let Some(digest) = manifest["digest"].as_str() {
+                                return Ok(digest.to_string());
+                            }
+                        }
+                    }
+                    
+                    // Fallback: return first manifest digest
+                    if let Some(first) = manifests.first() {
+                        if let Some(digest) = first["digest"].as_str() {
+                            return Ok(digest.to_string());
+                        }
+                    }
+                }
+                
+                anyhow::bail!("No suitable manifest found in manifest list");
+            } else {
+                // Single architecture manifest - use Docker-Content-Digest header
+                let digest = resp
+                    .headers()
+                    .get("docker-content-digest")
+                    .and_then(|v| v.to_str().ok())
+                    .map(|s| s.to_string())
+                    .ok_or_else(|| anyhow::anyhow!("Docker-Content-Digest header not found"))?;
 
-            Ok(digest)
+                Ok(digest)
+            }
         })
     }
 
