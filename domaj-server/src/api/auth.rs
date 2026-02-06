@@ -120,23 +120,47 @@ pub async fn register(
 /// Login and get JWT token
 pub async fn login(
     State(state): State<Arc<AppState>>,
+    axum::extract::ConnectInfo(addr): axum::extract::ConnectInfo<std::net::SocketAddr>,
     Json(req): Json<LoginRequest>,
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
+    let ip = addr.ip();
+
+    // Check rate limit
+    if let Err(seconds) = state.rate_limiter.check(ip).await {
+        return Err((
+            StatusCode::TOO_MANY_REQUESTS,
+            format!("Too many login attempts. Try again in {} seconds.", seconds),
+        ));
+    }
+
     // Find user
-    let user: User = sqlx::query_as("SELECT * FROM users WHERE username = ?")
+    let user: User = match sqlx::query_as("SELECT * FROM users WHERE username = ?")
         .bind(&req.username)
         .fetch_optional(&state.db)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
-        .ok_or((StatusCode::UNAUTHORIZED, "Invalid credentials".to_string()))?;
+    {
+        Ok(Some(user)) => user,
+        Ok(None) => {
+            state.rate_limiter.record_failure(ip).await;
+            return Err((StatusCode::UNAUTHORIZED, "Invalid credentials".to_string()));
+        }
+        Err(e) => return Err((StatusCode::INTERNAL_SERVER_ERROR, e.to_string())),
+    };
 
     // Verify password
     let parsed_hash = PasswordHash::new(&user.password_hash)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     
-    Argon2::default()
+    if Argon2::default()
         .verify_password(req.password.as_bytes(), &parsed_hash)
-        .map_err(|_| (StatusCode::UNAUTHORIZED, "Invalid credentials".to_string()))?;
+        .is_err()
+    {
+        state.rate_limiter.record_failure(ip).await;
+        return Err((StatusCode::UNAUTHORIZED, "Invalid credentials".to_string()));
+    }
+
+    // Record success and reset counter
+    state.rate_limiter.record_success(ip).await;
 
     // Create JWT
     let token = create_jwt(user.id, &user.username, &user.role, &state.config.jwt_secret)

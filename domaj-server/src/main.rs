@@ -21,11 +21,14 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 use crate::config::Config;
 use crate::scheduler::Scheduler;
 
+use crate::api::rate_limit::RateLimiter;
+
 /// Application state shared across all handlers
 pub struct AppState {
     pub db: SqlitePool,
     pub config: Config,
     pub scheduler: Arc<RwLock<Scheduler>>,
+    pub rate_limiter: Arc<RateLimiter>,
 }
 
 #[tokio::main]
@@ -56,11 +59,15 @@ async fn main() -> anyhow::Result<()> {
     // Initialize scheduler
     let scheduler = Arc::new(RwLock::new(Scheduler::new()));
 
+    // Initialize rate limiter
+    let rate_limiter = api::rate_limit::create_rate_limiter();
+
     // Create app state
     let state = Arc::new(AppState {
         db: db.clone(),
         config: config.clone(),
         scheduler: scheduler.clone(),
+        rate_limiter,
     });
 
     // Start the scheduler
@@ -82,7 +89,11 @@ async fn main() -> anyhow::Result<()> {
     let listener = tokio::net::TcpListener::bind(&addr).await?;
     tracing::info!("🌐 Server listening on http://{}", addr);
 
-    axum::serve(listener, app).await?;
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+    )
+    .await?;
 
     Ok(())
 }

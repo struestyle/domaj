@@ -4,6 +4,7 @@
 
 pub mod auth;
 mod containers;
+pub mod rate_limit;
 mod servers;
 mod websocket;
 
