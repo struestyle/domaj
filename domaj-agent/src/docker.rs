@@ -3,6 +3,7 @@
 //! Interfaces with the local Docker daemon via the Unix socket.
 
 use anyhow::{anyhow, Result};
+use bollard::auth::DockerCredentials;
 use bollard::container::{
     Config, CreateContainerOptions, ListContainersOptions, RemoveContainerOptions,
     StartContainerOptions, StopContainerOptions,
@@ -12,6 +13,8 @@ use bollard::Docker;
 use futures_util::StreamExt;
 use serde::Serialize;
 use std::collections::HashMap;
+
+use crate::RegistryCredential;
 
 /// Information about a Docker container
 #[derive(Debug, Clone, Serialize)]
@@ -169,7 +172,7 @@ impl DockerClient {
     /// 3. Remove the old container
     /// 4. Create a new container with the same config but new image
     /// 5. Start the new container
-    pub async fn update_container(&self, container_name: &str, target_tag: Option<&str>) -> Result<UpdateResult> {
+    pub async fn update_container(&self, container_name: &str, target_tag: Option<&str>, credentials: Option<&RegistryCredential>) -> Result<UpdateResult> {
         // Get the container info first
         let container = self.get_container(container_name).await?
             .ok_or_else(|| anyhow!("Container '{}' not found", container_name))?;
@@ -202,7 +205,15 @@ impl DockerClient {
             ..Default::default()
         };
         
-        let mut pull_stream = self.docker.create_image(Some(pull_options), None, None);
+        // Build Docker credentials if we have registry credentials
+        let docker_creds = credentials.map(|cred| DockerCredentials {
+            username: Some(cred.username.clone()),
+            password: Some(cred.password.clone()),
+            serveraddress: Some(cred.host.clone()),
+            ..Default::default()
+        });
+        
+        let mut pull_stream = self.docker.create_image(Some(pull_options), None, docker_creds);
         while let Some(result) = pull_stream.next().await {
             match result {
                 Ok(info) => {

@@ -6,6 +6,7 @@
         deleteServer,
         syncServer,
         updateServer,
+        checkServerHealth,
     } from "$lib/api.js";
     import { toasts } from "$lib/stores/toast.js";
 
@@ -20,6 +21,9 @@
     let editingServer = null;
     let editForm = { name: "", endpoint: "" };
 
+    // Health check state: { [serverId]: { status: 'checking'|'ok'|'auth_error'|'unreachable', error: string|null, checking: boolean } }
+    let healthStatus = {};
+
     onMount(async () => {
         await loadServers();
     });
@@ -28,10 +32,57 @@
         try {
             loading = true;
             servers = await getServers();
+            // Auto-check health for all servers
+            for (const server of servers) {
+                checkHealth(server.id);
+            }
         } catch (e) {
             error = e.message;
         } finally {
             loading = false;
+        }
+    }
+
+    async function checkHealth(id) {
+        healthStatus = {
+            ...healthStatus,
+            [id]: { status: "checking", error: null, checking: true },
+        };
+        try {
+            const result = await checkServerHealth(id);
+            if (result.reachable && result.authenticated) {
+                healthStatus = {
+                    ...healthStatus,
+                    [id]: { status: "ok", error: null, checking: false },
+                };
+            } else if (result.reachable && !result.authenticated) {
+                healthStatus = {
+                    ...healthStatus,
+                    [id]: {
+                        status: "auth_error",
+                        error: result.error,
+                        checking: false,
+                    },
+                };
+            } else {
+                healthStatus = {
+                    ...healthStatus,
+                    [id]: {
+                        status: "unreachable",
+                        error: result.error,
+                        checking: false,
+                    },
+                };
+            }
+        } catch (e) {
+            healthStatus = {
+                ...healthStatus,
+                [id]: {
+                    status: "unreachable",
+                    error: e.message,
+                    checking: false,
+                },
+            };
         }
     }
 
@@ -44,6 +95,7 @@
             servers = [...servers, created];
             newServer = { name: "", endpoint: "" };
             showAddForm = false;
+            checkHealth(created.id);
         } catch (e) {
             toasts.error("Erreur: " + e.message);
         } finally {
@@ -57,6 +109,8 @@
         try {
             await deleteServer(id);
             servers = servers.filter((s) => s.id !== id);
+            delete healthStatus[id];
+            healthStatus = healthStatus;
         } catch (e) {
             toasts.error("Erreur: " + e.message);
         }
@@ -90,6 +144,7 @@
             const updated = await updateServer(editingServer.id, editForm);
             servers = servers.map((s) => (s.id === updated.id ? updated : s));
             cancelEdit();
+            checkHealth(updated.id);
         } catch (e) {
             toasts.error("Erreur: " + e.message);
         } finally {
@@ -187,16 +242,32 @@
                 </thead>
                 <tbody>
                     {#each servers as server}
+                        {@const hs = healthStatus[server.id]}
                         <tr>
                             <td>
                                 <span
-                                    class="status-indicator {server.last_seen
-                                        ? 'status-online'
-                                        : 'status-offline'}"
+                                    class="status-indicator {!hs ||
+                                    hs.status === 'checking'
+                                        ? 'status-checking'
+                                        : hs.status === 'ok'
+                                          ? 'status-online'
+                                          : hs.status === 'auth_error'
+                                            ? 'status-auth-error'
+                                            : 'status-offline'}"
+                                    title={hs?.error || ""}
                                 >
-                                    {server.last_seen
-                                        ? "En ligne"
-                                        : "Hors ligne"}
+                                    {#if hs?.checking}
+                                        <span class="spinner"></span>
+                                    {/if}
+                                    {#if !hs || hs.status === "checking"}
+                                        Vérification…
+                                    {:else if hs.status === "ok"}
+                                        Connecté
+                                    {:else if hs.status === "auth_error"}
+                                        Clé API invalide
+                                    {:else}
+                                        Injoignable
+                                    {/if}
                                 </span>
                             </td>
                             <td>
@@ -221,6 +292,28 @@
                             </td>
                             <td>
                                 <div class="action-buttons">
+                                    <button
+                                        class="btn btn-secondary"
+                                        on:click={() => checkHealth(server.id)}
+                                        title="Tester la connexion"
+                                        disabled={healthStatus[server.id]
+                                            ?.checking}
+                                    >
+                                        <svg
+                                            class="btn-icon-only"
+                                            viewBox="0 0 24 24"
+                                            fill="none"
+                                            stroke="currentColor"
+                                            stroke-width="2"
+                                        >
+                                            <path
+                                                d="M22 11.08V12a10 10 0 1 1-5.93-9.14"
+                                            ></path>
+                                            <polyline
+                                                points="22 4 12 14.01 9 11.01"
+                                            ></polyline>
+                                        </svg>
+                                    </button>
                                     <button
                                         class="btn btn-secondary"
                                         on:click={() =>
@@ -392,9 +485,37 @@
         color: var(--color-success);
     }
 
+    .status-auth-error {
+        background: rgba(245, 158, 11, 0.15);
+        color: #f59e0b;
+    }
+
     .status-offline {
-        background: rgba(156, 163, 175, 0.15);
+        background: rgba(239, 68, 68, 0.15);
+        color: #ef4444;
+    }
+
+    .status-checking {
+        background: rgba(156, 163, 175, 0.1);
         color: var(--text-muted);
+    }
+
+    .spinner {
+        display: inline-block;
+        width: 10px;
+        height: 10px;
+        border: 2px solid currentColor;
+        border-right-color: transparent;
+        border-radius: 50%;
+        animation: spin 0.6s linear infinite;
+        margin-right: 4px;
+        vertical-align: middle;
+    }
+
+    @keyframes spin {
+        to {
+            transform: rotate(360deg);
+        }
     }
 
     .link-primary {

@@ -287,3 +287,75 @@ pub async fn sync_server(
     // Return updated containers
     get_server_containers(State(state), Path(id)).await
 }
+
+/// Check the health/connectivity of an agent
+pub async fn check_server_health(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<i64>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    let server = sqlx::query_as::<_, Server>("SELECT * FROM servers WHERE id = ?")
+        .bind(id)
+        .fetch_optional(&state.db)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .ok_or(StatusCode::NOT_FOUND)?;
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(5))
+        .build()
+        .unwrap_or_default();
+
+    let info_url = format!("{}/info", server.endpoint.trim_end_matches('/'));
+
+    match client
+        .get(&info_url)
+        .header("X-API-Key", &state.config.api_secret)
+        .send()
+        .await
+    {
+        Ok(response) => {
+            if response.status().is_success() {
+                #[derive(serde::Deserialize)]
+                struct AgentInfo {
+                    agent_id: Option<String>,
+                }
+                let agent_info = response.json::<AgentInfo>().await.ok();
+                Ok(Json(serde_json::json!({
+                    "reachable": true,
+                    "authenticated": true,
+                    "agent_id": agent_info.and_then(|i| i.agent_id),
+                    "error": null
+                })))
+            } else if response.status() == reqwest::StatusCode::UNAUTHORIZED {
+                Ok(Json(serde_json::json!({
+                    "reachable": true,
+                    "authenticated": false,
+                    "agent_id": null,
+                    "error": "Clé API invalide — l'agent a rejeté l'authentification (401)"
+                })))
+            } else {
+                Ok(Json(serde_json::json!({
+                    "reachable": true,
+                    "authenticated": false,
+                    "agent_id": null,
+                    "error": format!("L'agent a répondu avec le statut {}", response.status())
+                })))
+            }
+        }
+        Err(e) => {
+            let error_msg = if e.is_timeout() {
+                "Timeout — l'agent ne répond pas dans les 5 secondes".to_string()
+            } else if e.is_connect() {
+                format!("Connexion impossible à {}", info_url)
+            } else {
+                format!("Erreur réseau: {}", e)
+            };
+            Ok(Json(serde_json::json!({
+                "reachable": false,
+                "authenticated": false,
+                "agent_id": null,
+                "error": error_msg
+            })))
+        }
+    }
+}

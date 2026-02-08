@@ -3,6 +3,23 @@
 //! Reads configuration from environment variables.
 
 use anyhow::{Context, Result};
+use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
+
+/// Credentials for a private container registry
+#[derive(Debug, Clone)]
+pub struct RegistryCredential {
+    pub host: String,
+    pub username: String,
+    pub password: String,
+}
+
+impl RegistryCredential {
+    /// Encode credentials as Basic auth header value
+    pub fn basic_auth(&self) -> String {
+        let encoded = BASE64.encode(format!("{}:{}", self.username, self.password));
+        format!("Basic {}", encoded)
+    }
+}
 
 /// Server configuration
 #[derive(Debug, Clone)]
@@ -35,6 +52,9 @@ pub struct Config {
     
     /// Comma-separated list of notification email addresses
     pub notify_emails: Vec<String>,
+    
+    /// Private registry credentials
+    pub registry_credentials: Vec<RegistryCredential>,
 }
 
 impl Config {
@@ -83,6 +103,21 @@ impl Config {
         let admin_username = std::env::var("ADMIN_USERNAME").ok();
         let admin_password = std::env::var("ADMIN_PASSWORD").ok();
         
+        // Parse registry credentials (REGISTRY_1_HOST, REGISTRY_1_USER, REGISTRY_1_PASSWORD, ...)
+        let mut registry_credentials = Vec::new();
+        for i in 1..=10 {
+            let host = std::env::var(format!("REGISTRY_{}_HOST", i));
+            let user = std::env::var(format!("REGISTRY_{}_USER", i));
+            let pass = std::env::var(format!("REGISTRY_{}_PASSWORD", i));
+            
+            if let (Ok(host), Ok(username), Ok(password)) = (host, user, pass) {
+                if !host.is_empty() {
+                    tracing::info!("🔐 Loaded credentials for registry: {}", host);
+                    registry_credentials.push(RegistryCredential { host, username, password });
+                }
+            }
+        }
+        
         Ok(Self {
             database_url,
             port,
@@ -97,6 +132,7 @@ impl Config {
             smtp_password,
             smtp_from,
             notify_emails,
+            registry_credentials,
         })
     }
     

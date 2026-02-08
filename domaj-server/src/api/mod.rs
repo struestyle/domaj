@@ -62,6 +62,7 @@ pub fn router(jwt_secret: String) -> Router<Arc<AppState>> {
         .route("/servers/:id", delete(servers::delete_server))
         .route("/servers/:id/containers", get(servers::get_server_containers))
         .route("/servers/:id/sync", post(servers::sync_server))
+        .route("/servers/:id/health", get(servers::check_server_health))
         
         // Container management
         .route("/containers", get(containers::list_containers))

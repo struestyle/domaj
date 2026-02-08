@@ -177,7 +177,13 @@ async fn sync_server_containers(state: &AppState, server: &Server) -> Result<()>
 /// Check for updates for a single container
 async fn check_container_updates(state: &AppState, container: &Container) -> Result<bool> {
     let image_ref = ImageReference::parse(&container.image);
-    let client = get_registry_client(&image_ref.registry);
+    
+    // Look up credentials for this registry
+    let credentials = state.config.registry_credentials
+        .iter()
+        .find(|c| c.host == image_ref.registry);
+    
+    let client = get_registry_client(&image_ref.registry, credentials);
     
     let mut has_any_update = false;
 

@@ -19,12 +19,21 @@ use uuid::Uuid;
 
 use crate::docker::DockerClient;
 
+/// Registry credential for private registries
+#[derive(Debug, Clone)]
+pub struct RegistryCredential {
+    pub host: String,
+    pub username: String,
+    pub password: String,
+}
+
 /// Agent configuration
 #[derive(Debug, Clone)]
 pub struct Config {
     pub port: u16,
     pub api_key: String,
     pub agent_id: String,
+    pub registry_credentials: Vec<RegistryCredential>,
 }
 
 impl Config {
@@ -42,7 +51,34 @@ impl Config {
         // Get or generate unique agent ID
         let agent_id = get_or_create_agent_id()?;
 
-        Ok(Self { port, api_key, agent_id })
+        // Parse registry credentials (REGISTRY_1_HOST, REGISTRY_1_USER, REGISTRY_1_PASSWORD, ...)
+        let mut registry_credentials = Vec::new();
+        for i in 1..=10 {
+            let host = std::env::var(format!("REGISTRY_{}_HOST", i));
+            let user = std::env::var(format!("REGISTRY_{}_USER", i));
+            let pass = std::env::var(format!("REGISTRY_{}_PASSWORD", i));
+            
+            if let (Ok(host), Ok(username), Ok(password)) = (host, user, pass) {
+                if !host.is_empty() {
+                    tracing::info!("🔐 Loaded credentials for registry: {}", host);
+                    registry_credentials.push(RegistryCredential { host, username, password });
+                }
+            }
+        }
+
+        Ok(Self { port, api_key, agent_id, registry_credentials })
+    }
+
+    /// Find credentials for a given image reference
+    pub fn find_credentials_for_image(&self, image: &str) -> Option<&RegistryCredential> {
+        // Extract the registry hostname from the image
+        let image_part = image.split(':').next().unwrap_or(image);
+        if let Some(first_segment) = image_part.split('/').next() {
+            if first_segment.contains('.') || first_segment.contains(':') {
+                return self.registry_credentials.iter().find(|c| c.host == first_segment);
+            }
+        }
+        None
     }
 }
 
@@ -217,8 +253,36 @@ async fn update_container(
     
     tracing::info!("🔄 Received update request for container '{}' (target_tag: {:?})", name, body.target_tag);
     
+    // First get the container to determine its image
+    let container = state.docker.get_container(&name).await.map_err(|e| {
+        tracing::error!("Failed to get container {}: {}", name, e);
+        (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({
+            "error": format!("Failed to get container: {}", e)
+        })))
+    })?;
+    
+    let container = container.ok_or_else(|| {
+        (StatusCode::NOT_FOUND, Json(serde_json::json!({
+            "error": format!("Container '{}' not found", name)
+        })))
+    })?;
+    
+    // Determine the image to pull (with target tag if specified)
+    let pull_image = if let Some(ref tag) = body.target_tag {
+        let base = container.image.split(':').next().unwrap_or(&container.image);
+        format!("{}:{}", base, tag)
+    } else {
+        container.image.clone()
+    };
+    
+    // Find credentials for the registry
+    let credentials = state.config.find_credentials_for_image(&pull_image);
+    if credentials.is_some() {
+        tracing::info!("🔐 Using private registry credentials for {}", pull_image);
+    }
+    
     let result = state.docker
-        .update_container(&name, body.target_tag.as_deref())
+        .update_container(&name, body.target_tag.as_deref(), credentials)
         .await
         .map_err(|e| {
             tracing::error!("Failed to update container {}: {}", name, e);

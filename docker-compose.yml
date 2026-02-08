@@ -14,7 +14,7 @@ services:
     networks:
       - domaj-network
     env_file:
-      - server.env
+      - domaj-server.env
   web:
     build:
       context: ./domaj-web
@@ -28,7 +28,7 @@ services:
     networks:
       - domaj-network
     env_file:
-      - web.env
+      - domaj-web.env
 volumes:
   domaj-data:
     driver: local

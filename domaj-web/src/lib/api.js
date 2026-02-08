@@ -78,6 +78,10 @@ export async function getServerContainers(id) {
     return fetchApi(`/servers/${id}/containers`);
 }
 
+export async function checkServerHealth(id) {
+    return fetchApi(`/servers/${id}/health`);
+}
+
 export async function getContainers() {
     return fetchApi('/containers');
 }

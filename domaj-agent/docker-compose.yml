@@ -13,4 +13,4 @@ services:
       # Read-only access to Docker socket
       - /var/run/docker.sock:/var/run/docker.sock:ro
     env_file:
-      - agent.env
+      - ../domaj-agent.env

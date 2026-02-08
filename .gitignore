@@ -8,9 +8,9 @@
 /domaj-web/build/
 /domaj-web/.svelte-kit/
 
-# Environment
-.env
-.env.local
+# Environment (secrets)
+*.env
+!*.env.example
 
 # Database
 *.db
