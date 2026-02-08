@@ -1,5 +1,7 @@
 # Build stage
-FROM rust:1-bookworm AS builder
+FROM rust:1-alpine AS builder
+
+RUN apk add --no-cache musl-dev
 
 WORKDIR /app
 
@@ -19,12 +21,9 @@ COPY src ./src
 RUN touch src/main.rs && cargo build --release
 
 # Runtime stage
-FROM debian:bookworm-slim
+FROM alpine:3.21
 
-RUN apt-get update && apt-get install -y \
-    ca-certificates \
-    libssl3 \
-    && rm -rf /var/lib/apt/lists/*
+RUN apk add --no-cache ca-certificates
 
 WORKDIR /app
 
