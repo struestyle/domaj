@@ -104,3 +104,7 @@ export async function updateContainer(containerId, targetTag = null) {
         body: JSON.stringify({ target_tag: targetTag })
     });
 }
+
+export async function getRegistries() {
+    return fetchApi('/registries');
+}

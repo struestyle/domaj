@@ -537,8 +537,7 @@
     }
 
     .action-buttons {
-        display: flex;
-        gap: var(--spacing-xs);
+        white-space: nowrap;
     }
 
     .btn-icon-only {

@@ -4,6 +4,7 @@
 
 pub mod auth;
 mod containers;
+mod registries;
 mod servers;
 mod websocket;
 
@@ -78,6 +79,9 @@ pub fn router(jwt_secret: String) -> Router<Arc<AppState>> {
         
         // System status
         .route("/status", get(status))
+        
+        // Registries
+        .route("/registries", get(registries::list_registries))
         
         // WebSocket for real-time updates
         .route("/ws", get(websocket::ws_handler))
