@@ -175,11 +175,13 @@ async fn health() -> Json<serde_json::Value> {
 /// Agent info endpoint - returns unique agent ID
 async fn info(
     State(state): State<Arc<AppState>>,
-) -> Json<serde_json::Value> {
-    Json(serde_json::json!({
+    headers: HeaderMap,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    check_api_key(&headers, &state.config.api_key)?;
+    Ok(Json(serde_json::json!({
         "agent_id": state.config.agent_id,
         "version": env!("CARGO_PKG_VERSION"),
-    }))
+    })))
 }
 
 /// Middleware to check API key

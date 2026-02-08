@@ -168,17 +168,6 @@
                         {new Date(server.created_at).toLocaleString("fr-FR")}
                     </div>
                 </div>
-                <div class="info-item">
-                    <div class="info-label">Clé API</div>
-                    <div class="info-value">
-                        <code class="api-key"
-                            >{server.api_key.slice(
-                                0,
-                                8,
-                            )}...{server.api_key.slice(-4)}</code
-                        >
-                    </div>
-                </div>
             </div>
         </section>
     {/if}
@@ -251,7 +240,7 @@
 
     .info-grid {
         display: grid;
-        grid-template-columns: repeat(3, 1fr);
+        grid-template-columns: repeat(2, 1fr);
         gap: var(--spacing-lg);
     }
 
@@ -267,12 +256,6 @@
         font-weight: 500;
     }
 
-    .api-key {
-        font-size: 0.875rem;
-        background: var(--bg-primary);
-        padding: 4px 8px;
-        border-radius: 4px;
-    }
 
     .empty-state {
         text-align: center;
