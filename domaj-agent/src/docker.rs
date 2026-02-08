@@ -5,8 +5,8 @@
 use anyhow::{anyhow, Result};
 use bollard::auth::DockerCredentials;
 use bollard::container::{
-    Config, CreateContainerOptions, ListContainersOptions, RemoveContainerOptions,
-    StartContainerOptions, StopContainerOptions,
+    Config, CreateContainerOptions, InspectContainerOptions, ListContainersOptions,
+    RemoveContainerOptions, StartContainerOptions, StopContainerOptions,
 };
 use bollard::image::CreateImageOptions;
 use bollard::Docker;
@@ -96,10 +96,25 @@ impl DockerClient {
                 .trim_start_matches('/')
                 .to_string();
 
-            let image = c.image.clone().unwrap_or_default();
+            let image_raw = c.image.clone().unwrap_or_default();
             
-            // Get the RepoDigest and architecture from image inspection
-            let (image_digest, architecture) = if let Some(image_id) = &c.image_id {
+            // Get container details: resolve image name, digest, and architecture
+            // If the image field is a sha256 digest (common with private registries),
+            // inspect the container to get Config.Image which has the full registry path
+            let resolved_image = if image_raw.starts_with("sha256:") {
+                match self.docker.inspect_container(&id, None::<InspectContainerOptions>).await {
+                    Ok(container_detail) => {
+                        container_detail.config
+                            .and_then(|cfg| cfg.image)
+                            .unwrap_or(image_raw.clone())
+                    }
+                    Err(_) => image_raw.clone(),
+                }
+            } else {
+                image_raw.clone()
+            };
+            
+            let (image, image_digest, architecture) = if let Some(image_id) = &c.image_id {
                 match self.docker.inspect_image(image_id).await {
                     Ok(inspect) => {
                         // RepoDigests contains entries like "postgres@sha256:1090bc3a..."
@@ -111,12 +126,12 @@ impl DockerClient {
                             });
                         // Get architecture from image inspection
                         let arch = inspect.architecture;
-                        (digest, arch)
+                        (resolved_image, digest, arch)
                     }
-                    Err(_) => (c.image_id.clone(), None), // Fallback
+                    Err(_) => (resolved_image, c.image_id.clone(), None), // Fallback
                 }
             } else {
-                (None, None)
+                (resolved_image, None, None)
             };
             
             let status = c.status.unwrap_or_default();
