@@ -3,7 +3,8 @@
 
 services:
   agent:
-    image: hb.louislelievre.fr/domaj/domaj-agent:latest
+    build: .
+    image: domaj-agent:latest
     container_name: domaj-agent
     restart: unless-stopped
     ports:
