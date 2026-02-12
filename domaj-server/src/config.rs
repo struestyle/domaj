@@ -53,6 +53,10 @@ pub struct Config {
     /// Comma-separated list of notification email addresses
     pub notify_emails: Vec<String>,
     
+    // Telegram Configuration
+    pub telegram_bot_token: Option<String>,
+    pub telegram_chat_ids: Vec<String>,
+    
     /// Private registry credentials
     pub registry_credentials: Vec<RegistryCredential>,
 }
@@ -99,6 +103,14 @@ impl Config {
             .filter(|s| !s.is_empty())
             .collect();
         
+        let telegram_bot_token = std::env::var("TELEGRAM_BOT_TOKEN").ok().filter(|s| !s.is_empty());
+        let telegram_chat_ids: Vec<String> = std::env::var("TELEGRAM_CHAT_IDS")
+            .unwrap_or_default()
+            .split(',')
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect();
+        
         // Admin account configuration (optional)
         let admin_username = std::env::var("ADMIN_USERNAME").ok();
         let admin_password = std::env::var("ADMIN_PASSWORD").ok();
@@ -132,6 +144,8 @@ impl Config {
             smtp_password,
             smtp_from,
             notify_emails,
+            telegram_bot_token,
+            telegram_chat_ids,
             registry_credentials,
         })
     }
@@ -139,5 +153,10 @@ impl Config {
     /// Check if SMTP is properly configured
     pub fn is_smtp_configured(&self) -> bool {
         self.smtp_host.is_some() && self.smtp_from.is_some()
+    }
+    
+    /// Check if Telegram is properly configured
+    pub fn is_telegram_configured(&self) -> bool {
+        self.telegram_bot_token.is_some() && !self.telegram_chat_ids.is_empty()
     }
 }

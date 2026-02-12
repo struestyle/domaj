@@ -9,7 +9,7 @@
 - [x] Déploiement Docker Compose
 
 ## Version 1.1 - Notifications Avancées
-- [ ] Intégration Telegram (teloxide)
+- [x] Intégration Telegram (API Bot via reqwest)
 - [ ] Intégration Discord (serenity/webhook)
 - [ ] Intégration Slack (webhook)
 - [ ] WhatsApp Business API (si demandé)
@@ -17,16 +17,16 @@
 ## Version 1.2 - Registres Privés & Database
 - [ ] Support PostgreSQL comme base de données externe
 - [ ] Migration SQLite vers PostgreSQL
-- [ ] Support Harbor
+- [x] Support Harbor
 - [ ] Support GitLab Container Registry
 - [ ] Support AWS ECR
 - [ ] Support Azure ACR
 - [ ] Support Google Artifact Registry
-- [ ] Gestion des credentials par registre
+- [x] Gestion des credentials par registre
 
 ## Version 1.3 - Actions Automatiques
-- [ ] Déclenchement de mise à jour depuis l'interface
-- [ ] Pull automatique d'images
+- [x] Déclenchement de mise à jour depuis l'interface
+- [x] Pull automatique d'images
 - [ ] Restart de conteneurs
 - [ ] Rollback vers version précédente
 - [ ] Dry-run mode (simulation)
@@ -39,6 +39,8 @@
 - [ ] Audit logs des actions
 
 ## Version 2.0 - Sécurité & Observabilité
+- [ ] TLS mutuel (mTLS) serveur↔agent avec PKI (serveur de certificats)
+- [ ] Centralisation des credentials registre sur le serveur (envoi à l'agent lors des updates)
 - [ ] Scan CVE avec Trivy
 - [ ] Dashboard de vulnérabilités
 - [ ] Agrégation des changelogs entre versions
