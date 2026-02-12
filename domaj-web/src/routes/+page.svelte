@@ -796,9 +796,7 @@
     }
 
     .actions-cell {
-        display: flex;
-        gap: 0.5rem;
-        flex-wrap: wrap;
+        white-space: nowrap;
     }
 
     .btn-sm {
