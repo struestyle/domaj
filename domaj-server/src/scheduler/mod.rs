@@ -104,6 +104,12 @@ pub async fn run_scan(state: &AppState) -> Result<()> {
 
     tracing::info!("Scan complete. Found {} containers with updates", total_updates);
 
+    // Broadcast scan completed event
+    let _ = state.broadcast_tx.send(serde_json::json!({
+        "type": "scan_completed",
+        "total_updates": total_updates
+    }).to_string());
+
     // Send notification if there are updates
     if total_updates > 0 {
         if let Err(e) = crate::notifier::send_update_report(state).await {

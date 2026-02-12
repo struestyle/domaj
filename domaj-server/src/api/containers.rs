@@ -207,12 +207,12 @@ pub struct UpdateContainerRequest {
     pub target_tag: Option<String>,
 }
 
-/// Update a container via its agent
+/// Update a container via its agent (async with job tracking)
 pub async fn update_container(
     State(state): State<Arc<AppState>>,
     Path(id): Path<i64>,
     Json(body): Json<UpdateContainerRequest>,
-) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+) -> Result<(StatusCode, Json<serde_json::Value>), (StatusCode, Json<serde_json::Value>)> {
     // Get container info
     let container: Container = sqlx::query_as("SELECT * FROM containers WHERE id = ?")
         .bind(id)
@@ -239,45 +239,161 @@ pub async fn update_container(
         body.target_tag
     );
 
-    // Send update request to agent
-    let client = reqwest::Client::new();
-    let agent_url = format!(
-        "{}/containers/{}/update",
-        server.endpoint.trim_end_matches('/'),
-        container.name
-    );
-
-    let response = client
-        .post(&agent_url)
-        .header("X-API-Key", &state.config.api_secret)
-        .json(&serde_json::json!({
-            "target_tag": body.target_tag
-        }))
-        .send()
-        .await
-        .map_err(|e| {
-            tracing::error!("Failed to contact agent: {}", e);
-            (StatusCode::BAD_GATEWAY, Json(serde_json::json!({
-                "error": format!("Failed to contact agent: {}", e)
-            })))
-        })?;
-
-    if !response.status().is_success() {
-        let status = response.status();
-        let error_body = response.json::<serde_json::Value>().await.unwrap_or_default();
-        tracing::error!("Agent returned error: {} - {:?}", status, error_body);
-        return Err((StatusCode::BAD_GATEWAY, Json(serde_json::json!({
-            "error": error_body.get("error").and_then(|e| e.as_str()).unwrap_or("Agent error"),
-            "details": error_body
-        }))));
-    }
-
-    let result: serde_json::Value = response.json().await.map_err(|e| {
-        tracing::error!("Failed to parse agent response: {}", e);
-        (StatusCode::BAD_GATEWAY, Json(serde_json::json!({"error": "Invalid agent response"})))
+    // Create job in database
+    let job_id: i64 = sqlx::query_scalar(
+        "INSERT INTO update_jobs (container_id, container_name, server_name, image, target_tag, status) VALUES (?, ?, ?, ?, ?, 'running') RETURNING id"
+    )
+    .bind(container.id)
+    .bind(&container.name)
+    .bind(&server.name)
+    .bind(&container.image)
+    .bind(&body.target_tag)
+    .fetch_one(&state.db)
+    .await
+    .map_err(|e| {
+        tracing::error!("Failed to create update job: {}", e);
+        (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": "Failed to create job"})))
     })?;
 
-    tracing::info!("✅ Container {} updated successfully", container.name);
+    // Broadcast job started
+    let _ = state.broadcast_tx.send(serde_json::json!({
+        "type": "job_started",
+        "job": {
+            "id": job_id,
+            "container_name": container.name,
+            "server_name": server.name,
+            "image": container.image,
+            "target_tag": body.target_tag,
+            "status": "running"
+        }
+    }).to_string());
 
-    Ok(Json(result))
+    // Spawn background task
+    let state_clone = state.clone();
+    let container_id = container.id;
+    let container_name = container.name.clone();
+    let server_endpoint = server.endpoint.clone();
+    let target_tag = body.target_tag.clone();
+    let api_secret = state.config.api_secret.clone();
+
+    tokio::spawn(async move {
+        let client = reqwest::Client::new();
+        let agent_url = format!(
+            "{}/containers/{}/update",
+            server_endpoint.trim_end_matches('/'),
+            container_name
+        );
+
+        let result = client
+            .post(&agent_url)
+            .header("X-API-Key", &api_secret)
+            .json(&serde_json::json!({
+                "target_tag": target_tag
+            }))
+            .send()
+            .await;
+
+        match result {
+            Ok(response) if response.status().is_success() => {
+                tracing::info!("✅ Container {} updated successfully", container_name);
+                // Mark job as success
+                let _ = sqlx::query(
+                    "UPDATE update_jobs SET status = 'success', completed_at = CURRENT_TIMESTAMP WHERE id = ?"
+                )
+                .bind(job_id)
+                .execute(&state_clone.db)
+                .await;
+
+                // Clear update_checks so the container disappears from the updates list
+                let _ = sqlx::query(
+                    "DELETE FROM update_checks WHERE container_id = ?"
+                )
+                .bind(container_id)
+                .execute(&state_clone.db)
+                .await;
+
+                let _ = state_clone.broadcast_tx.send(serde_json::json!({
+                    "type": "job_completed",
+                    "job": {
+                        "id": job_id,
+                        "container_name": container_name,
+                        "status": "success"
+                    }
+                }).to_string());
+            }
+            Ok(response) => {
+                let status = response.status();
+                let error_body = response.json::<serde_json::Value>().await.unwrap_or_default();
+                let error_msg = error_body.get("error")
+                    .and_then(|e| e.as_str())
+                    .unwrap_or("Agent error")
+                    .to_string();
+                tracing::error!("Agent returned error for {}: {} - {}", container_name, status, error_msg);
+
+                let _ = sqlx::query(
+                    "UPDATE update_jobs SET status = 'failed', error_message = ?, completed_at = CURRENT_TIMESTAMP WHERE id = ?"
+                )
+                .bind(&error_msg)
+                .bind(job_id)
+                .execute(&state_clone.db)
+                .await;
+
+                let _ = state_clone.broadcast_tx.send(serde_json::json!({
+                    "type": "job_failed",
+                    "job": {
+                        "id": job_id,
+                        "container_name": container_name,
+                        "status": "failed",
+                        "error": error_msg
+                    }
+                }).to_string());
+            }
+            Err(e) => {
+                let error_msg = format!("Failed to contact agent: {}", e);
+                tracing::error!("{}", error_msg);
+
+                let _ = sqlx::query(
+                    "UPDATE update_jobs SET status = 'failed', error_message = ?, completed_at = CURRENT_TIMESTAMP WHERE id = ?"
+                )
+                .bind(&error_msg)
+                .bind(job_id)
+                .execute(&state_clone.db)
+                .await;
+
+                let _ = state_clone.broadcast_tx.send(serde_json::json!({
+                    "type": "job_failed",
+                    "job": {
+                        "id": job_id,
+                        "container_name": container_name,
+                        "status": "failed",
+                        "error": error_msg
+                    }
+                }).to_string());
+            }
+        }
+    });
+
+    Ok((StatusCode::ACCEPTED, Json(serde_json::json!({
+        "status": "accepted",
+        "job_id": job_id,
+        "message": "Update job started"
+    }))))
 }
+
+/// List all update jobs
+pub async fn list_update_jobs(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<Vec<crate::db::UpdateJob>>, StatusCode> {
+    let jobs: Vec<crate::db::UpdateJob> = sqlx::query_as(
+        "SELECT * FROM update_jobs ORDER BY started_at DESC LIMIT 50"
+    )
+    .fetch_all(&state.db)
+    .await
+    .map_err(|e| {
+        tracing::error!("Failed to fetch update jobs: {}", e);
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    Ok(Json(jobs))
+}
+

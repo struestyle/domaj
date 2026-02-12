@@ -108,3 +108,7 @@ export async function updateContainer(containerId, targetTag = null) {
 export async function getRegistries() {
     return fetchApi('/registries');
 }
+
+export async function getUpdateJobs() {
+    return fetchApi('/update-jobs');
+}

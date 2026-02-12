@@ -13,7 +13,7 @@ mod scheduler;
 use std::sync::Arc;
 use axum::Router;
 use sqlx::SqlitePool;
-use tokio::sync::RwLock;
+use tokio::sync::{broadcast, RwLock};
 use tower_http::cors::{Any, CorsLayer};
 use tower_http::trace::TraceLayer;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
@@ -26,6 +26,7 @@ pub struct AppState {
     pub db: SqlitePool,
     pub config: Config,
     pub scheduler: Arc<RwLock<Scheduler>>,
+    pub broadcast_tx: broadcast::Sender<String>,
 }
 
 #[tokio::main]
@@ -59,11 +60,15 @@ async fn main() -> anyhow::Result<()> {
     // Initialize scheduler
     let scheduler = Arc::new(RwLock::new(Scheduler::new()));
 
+    // Create broadcast channel for WebSocket events
+    let (broadcast_tx, _) = broadcast::channel::<String>(100);
+
     // Create app state
     let state = Arc::new(AppState {
         db: db.clone(),
         config: config.clone(),
         scheduler: scheduler.clone(),
+        broadcast_tx,
     });
 
     // Start the scheduler

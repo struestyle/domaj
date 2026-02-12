@@ -126,6 +126,31 @@ async fn run_migrations(pool: &SqlitePool) -> Result<()> {
         .execute(pool)
         .await?;
 
+    // Update jobs tracking table
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS update_jobs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            container_id INTEGER NOT NULL,
+            container_name TEXT NOT NULL,
+            server_name TEXT NOT NULL,
+            image TEXT NOT NULL,
+            target_tag TEXT,
+            status TEXT NOT NULL DEFAULT 'pending',
+            error_message TEXT,
+            started_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            completed_at DATETIME,
+            FOREIGN KEY (container_id) REFERENCES containers(id) ON DELETE CASCADE
+        )
+        "#,
+    )
+    .execute(pool)
+    .await?;
+
+    sqlx::query("CREATE INDEX IF NOT EXISTS idx_update_jobs_status ON update_jobs(status)")
+        .execute(pool)
+        .await?;
+
     tracing::debug!("Database migrations completed");
     Ok(())
 }

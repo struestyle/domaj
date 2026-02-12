@@ -82,6 +82,7 @@
           <a href="/" class="nav-link">Dashboard</a>
           <a href="/servers" class="nav-link">Serveurs</a>
           <a href="/registries" class="nav-link">Registres</a>
+          <a href="/logs" class="nav-link">Logs</a>
         </div>
 
         <div class="nav-actions">

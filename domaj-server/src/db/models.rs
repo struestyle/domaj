@@ -150,3 +150,19 @@ pub enum Criticality {
     /// Unknown/unversioned update
     Unknown,
 }
+
+/// An update job tracking entry
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct UpdateJob {
+    pub id: i64,
+    pub container_id: i64,
+    pub container_name: String,
+    pub server_name: String,
+    pub image: String,
+    pub target_tag: Option<String>,
+    pub status: String,
+    pub error_message: Option<String>,
+    pub started_at: DateTime<Utc>,
+    pub completed_at: Option<DateTime<Utc>>,
+}
+

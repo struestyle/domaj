@@ -1,5 +1,5 @@
 <script>
-    import { onMount } from "svelte";
+    import { onMount, onDestroy } from "svelte";
     import {
         getServers,
         getContainers,
@@ -7,6 +7,7 @@
         getStatus,
         updateContainer,
     } from "$lib/api.js";
+    import { websocketStore } from "$lib/stores/websocket.js";
 
     let servers = [];
     let containers = [];
@@ -21,7 +22,29 @@
     let updatingContainer = null;
     let updateError = null;
 
+    // Refresh data when a job finishes or scan completes
+    const unsubEvent = websocketStore.lastEvent.subscribe(async (event) => {
+        if (!event) return;
+        if (event.type === "job_completed" || event.type === "job_failed") {
+            try {
+                updates = await getUpdates();
+            } catch (e) {
+                /* ignore */
+            }
+        } else if (event.type === "scan_completed") {
+            try {
+                [containers, updates] = await Promise.all([
+                    getContainers(),
+                    getUpdates(),
+                ]);
+            } catch (e) {
+                /* ignore */
+            }
+        }
+    });
+
     onMount(async () => {
+        websocketStore.connect();
         try {
             [servers, containers, updates, status] = await Promise.all([
                 getServers(),
@@ -34,6 +57,11 @@
         } finally {
             loading = false;
         }
+    });
+
+    onDestroy(() => {
+        unsubEvent();
+        websocketStore.disconnect();
     });
 
     function parseImage(image) {
@@ -101,25 +129,15 @@
         updatingContainer = `${containerId}-${type}`;
 
         try {
-            // Determine target tag based on update type
             let targetTag = null;
             if (type === "patch") {
-                // Same tag update: re-pull current tag
                 const currentTag = update.image.split(":")[1] || "latest";
                 targetTag = currentTag;
             } else if (type === "latest") {
-                // Latest update: use the latest tag discovered
                 targetTag = update.latest_tag || "latest";
             }
 
             await updateContainer(containerId, targetTag);
-
-            // Remove the update from the list on success
-            updates = updates.filter((u) => u.container_id !== containerId);
-
-            // Refresh data
-            updates = await getUpdates();
-            stats = await getStats();
         } catch (err) {
             updateError = err.message;
             console.error("Update failed:", err);

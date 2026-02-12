@@ -74,6 +74,9 @@ pub fn router(jwt_secret: String) -> Router<Arc<AppState>> {
         // Updates overview
         .route("/updates", get(containers::list_updates))
         
+        // Update jobs
+        .route("/update-jobs", get(containers::list_update_jobs))
+        
         // Actions
         .route("/scan", post(containers::trigger_scan))
         
@@ -82,13 +85,14 @@ pub fn router(jwt_secret: String) -> Router<Arc<AppState>> {
         
         // Registries
         .route("/registries", get(registries::list_registries))
-        
-        // WebSocket for real-time updates
-        .route("/ws", get(websocket::ws_handler))
         .layer(middleware::from_fn_with_state(jwt_secret, auth::auth_middleware));
     
-    // Combine public and protected routes
-    auth_routes.merge(protected_routes)
+    // WebSocket route (handles its own auth via query param)
+    let ws_routes = Router::new()
+        .route("/ws", get(websocket::ws_handler));
+    
+    // Combine public, protected, and WS routes
+    auth_routes.merge(protected_routes).merge(ws_routes)
 }
 
 /// System status endpoint
