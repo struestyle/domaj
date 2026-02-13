@@ -166,3 +166,14 @@ pub struct UpdateJob {
     pub completed_at: Option<DateTime<Utc>>,
 }
 
+/// Registry credential stored in the database (managed via UI)
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct DbRegistryCredential {
+    pub id: i64,
+    pub host: String,
+    pub username: String,
+    #[serde(skip_serializing)]
+    pub password: String,
+    pub created_at: DateTime<Utc>,
+}
+

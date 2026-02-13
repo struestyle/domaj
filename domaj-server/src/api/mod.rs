@@ -4,7 +4,7 @@
 
 pub mod auth;
 mod containers;
-mod registries;
+pub mod registries;
 mod servers;
 mod websocket;
 
@@ -85,6 +85,9 @@ pub fn router(jwt_secret: String) -> Router<Arc<AppState>> {
         
         // Registries
         .route("/registries", get(registries::list_registries))
+        .route("/registries/credentials", post(registries::create_credential))
+        .route("/registries/credentials/:id", put(registries::update_credential))
+        .route("/registries/credentials/:id", delete(registries::delete_credential))
         .layer(middleware::from_fn_with_state(jwt_secret, auth::auth_middleware));
     
     // WebSocket route (handles its own auth via query param)

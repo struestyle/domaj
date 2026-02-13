@@ -184,8 +184,9 @@ async fn sync_server_containers(state: &AppState, server: &Server) -> Result<()>
 async fn check_container_updates(state: &AppState, container: &Container) -> Result<bool> {
     let image_ref = ImageReference::parse(&container.image);
     
-    // Look up credentials for this registry
-    let credentials = state.config.registry_credentials
+    // Look up credentials for this registry (merged env + DB)
+    let all_credentials = crate::api::registries::get_all_credentials(state).await;
+    let credentials = all_credentials
         .iter()
         .find(|c| c.host == image_ref.registry);
     

@@ -8,6 +8,8 @@
         updateContainer,
     } from "$lib/api.js";
     import { websocketStore } from "$lib/stores/websocket.js";
+    import { getToken } from "$lib/stores/auth.js";
+    import { toasts } from "$lib/stores/toast.js";
 
     let servers = [];
     let containers = [];
@@ -21,6 +23,7 @@
     let copiedId = null;
     let updatingContainer = null;
     let updateError = null;
+    let scanning = false;
 
     // Refresh data when a job finishes or scan completes
     const unsubEvent = websocketStore.lastEvent.subscribe(async (event) => {
@@ -145,6 +148,26 @@
             updatingContainer = null;
         }
     }
+    async function triggerScan() {
+        scanning = true;
+        const token = getToken();
+        try {
+            const response = await fetch("/api/scan", {
+                method: "POST",
+                headers: token ? { Authorization: `Bearer ${token}` } : {},
+            });
+            if (response.ok) {
+                toasts.success("Scan lancé en arrière-plan");
+            } else {
+                toasts.error("Erreur lors du lancement du scan");
+            }
+        } catch (error) {
+            console.error("Scan error:", error);
+            toasts.error("Erreur de connexion au serveur");
+        } finally {
+            scanning = false;
+        }
+    }
 </script>
 
 <svelte:head>
@@ -153,8 +176,28 @@
 
 <div class="container">
     <header class="page-header">
-        <h1>Dashboard</h1>
-        <p class="text-muted">Vue d'ensemble de vos instances Docker</p>
+        <div>
+            <h1>Dashboard</h1>
+            <p class="text-muted">Vue d'ensemble de vos instances Docker</p>
+        </div>
+        <button
+            class="btn btn-primary"
+            on:click={triggerScan}
+            disabled={scanning}
+        >
+            <svg
+                class="btn-icon"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                class:spin={scanning}
+            >
+                <circle cx="11" cy="11" r="8"></circle>
+                <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+            </svg>
+            {scanning ? "Scan en cours..." : "Scanner"}
+        </button>
     </header>
 
     {#if loading}
@@ -586,6 +629,9 @@
 
 <style>
     .page-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
         margin-bottom: var(--spacing-xl);
     }
 

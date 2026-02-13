@@ -151,6 +151,21 @@ async fn run_migrations(pool: &SqlitePool) -> Result<()> {
         .execute(pool)
         .await?;
 
+    // Registry credentials stored via UI
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS registry_credentials (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            host TEXT NOT NULL UNIQUE,
+            username TEXT NOT NULL,
+            password TEXT NOT NULL,
+            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+        "#,
+    )
+    .execute(pool)
+    .await?;
+
     tracing::debug!("Database migrations completed");
     Ok(())
 }

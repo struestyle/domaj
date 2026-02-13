@@ -25,6 +25,9 @@ export async function fetchApi(endpoint, options = {}) {
         // Try to parse error message from response body
         try {
             const errorData = await response.json();
+            if (errorData.error) {
+                throw new Error(errorData.error);
+            }
             if (errorData.message) {
                 throw new Error(errorData.message);
             }
@@ -107,6 +110,26 @@ export async function updateContainer(containerId, targetTag = null) {
 
 export async function getRegistries() {
     return fetchApi('/registries');
+}
+
+export async function addRegistryCredential(data) {
+    return fetchApi('/registries/credentials', {
+        method: 'POST',
+        body: JSON.stringify(data)
+    });
+}
+
+export async function updateRegistryCredential(id, data) {
+    return fetchApi(`/registries/credentials/${id}`, {
+        method: 'PUT',
+        body: JSON.stringify(data)
+    });
+}
+
+export async function deleteRegistryCredential(id) {
+    return fetchApi(`/registries/credentials/${id}`, {
+        method: 'DELETE'
+    });
 }
 
 export async function getUpdateJobs() {
