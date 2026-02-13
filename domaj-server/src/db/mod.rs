@@ -151,6 +151,14 @@ async fn run_migrations(pool: &SqlitePool) -> Result<()> {
         .execute(pool)
         .await?;
 
+    // Add previous_image and job_type columns for rollback support
+    let _ = sqlx::query("ALTER TABLE update_jobs ADD COLUMN previous_image TEXT")
+        .execute(pool)
+        .await;
+    let _ = sqlx::query("ALTER TABLE update_jobs ADD COLUMN job_type TEXT NOT NULL DEFAULT 'update'")
+        .execute(pool)
+        .await;
+
     // Registry credentials stored via UI
     sqlx::query(
         r#"

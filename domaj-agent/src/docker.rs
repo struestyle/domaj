@@ -179,7 +179,7 @@ impl DockerClient {
             .find(|c| c.id.starts_with(id) || c.name == id))
     }
 
-    /// Update a container to a new image tag
+    /// Update a container to a new image
     /// 
     /// This will:
     /// 1. Pull the new image
@@ -187,22 +187,17 @@ impl DockerClient {
     /// 3. Remove the old container
     /// 4. Create a new container with the same config but new image
     /// 5. Start the new container
-    pub async fn update_container(&self, container_name: &str, target_tag: Option<&str>, credentials: Option<&RegistryCredential>) -> Result<UpdateResult> {
+    pub async fn update_container(&self, container_name: &str, target_image: Option<&str>, credentials: Option<&RegistryCredential>) -> Result<UpdateResult> {
         // Get the container info first
         let container = self.get_container(container_name).await?
             .ok_or_else(|| anyhow!("Container '{}' not found", container_name))?;
         
         let old_image = container.image.clone();
         
-        // Determine the new image
-        let new_image = if let Some(tag) = target_tag {
-            // Replace the tag in the image reference
-            let base_image = old_image.split(':').next().unwrap_or(&old_image);
-            format!("{}:{}", base_image, tag)
-        } else {
-            // Just re-pull the same image (for same-tag updates)
-            old_image.clone()
-        };
+        // Use provided target image or re-pull the same image
+        let new_image = target_image
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| old_image.clone());
         
         tracing::info!("🔄 Updating container '{}': {} -> {}", container_name, old_image, new_image);
         

@@ -162,6 +162,8 @@ pub struct UpdateJob {
     pub target_tag: Option<String>,
     pub status: String,
     pub error_message: Option<String>,
+    pub previous_image: Option<String>,
+    pub job_type: String,
     pub started_at: DateTime<Utc>,
     pub completed_at: Option<DateTime<Utc>>,
 }

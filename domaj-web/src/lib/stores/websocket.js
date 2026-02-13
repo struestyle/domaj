@@ -7,8 +7,15 @@ function createWebSocketStore() {
     let ws = null;
     let reconnectTimer = null;
     let lastEvent = writable(null);
+    let refCount = 0;
 
     function connect() {
+        refCount++;
+        // Don't create a new connection if one is already open or connecting
+        if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
+            return;
+        }
+
         const token = getToken();
         if (!token) return;
 
@@ -27,11 +34,12 @@ function createWebSocketStore() {
                 lastEvent.set(data);
 
                 if (data.type === 'job_started') {
-                    toasts.info(`🔄 Mise à jour démarrée : ${data.job.container_name}`);
+                    const label = data.job.job_type === 'rollback' ? 'Rollback' : 'Mise à jour';
+                    toasts.info(`🔄 ${label} démarré : ${data.job.container_name}`);
                 } else if (data.type === 'job_completed') {
-                    toasts.success(`✅ Mise à jour réussie : ${data.job.container_name}`);
+                    toasts.success(`✅ Opération réussie : ${data.job.container_name}`);
                 } else if (data.type === 'job_failed') {
-                    toasts.error(`❌ Échec mise à jour : ${data.job.container_name}`);
+                    toasts.error(`❌ Échec : ${data.job.container_name}`);
                 }
             } catch (e) {
                 // ignore parse errors
@@ -40,8 +48,10 @@ function createWebSocketStore() {
 
         ws.onclose = () => {
             set('disconnected');
-            // Reconnect after 5 seconds
-            reconnectTimer = setTimeout(connect, 5000);
+            // Reconnect after 5 seconds only if still referenced
+            if (refCount > 0) {
+                reconnectTimer = setTimeout(connect, 5000);
+            }
         };
 
         ws.onerror = () => {
@@ -50,6 +60,9 @@ function createWebSocketStore() {
     }
 
     function disconnect() {
+        refCount = Math.max(0, refCount - 1);
+        if (refCount > 0) return; // Other pages still need the connection
+
         if (reconnectTimer) {
             clearTimeout(reconnectTimer);
             reconnectTimer = null;

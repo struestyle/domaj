@@ -1,11 +1,24 @@
 <script>
     import { onMount, onDestroy } from "svelte";
-    import { getUpdateJobs } from "$lib/api.js";
+    import { getUpdateJobs, rollbackJob } from "$lib/api.js";
     import { websocketStore } from "$lib/stores/websocket.js";
 
     let jobs = [];
     let loading = true;
     let error = null;
+    let rollingBack = null;
+
+    async function handleRollback(job) {
+        if (rollingBack) return;
+        rollingBack = job.id;
+        try {
+            await rollbackJob(job.id);
+        } catch (e) {
+            error = `Rollback failed: ${e.message}`;
+        } finally {
+            rollingBack = null;
+        }
+    }
 
     $: activeJobs = jobs.filter(
         (j) => j.status === "running" || j.status === "pending",
@@ -137,6 +150,11 @@
                                 <span class="text-muted"
                                     >sur {job.server_name}</span
                                 >
+                                {#if job.job_type === "rollback"}
+                                    <span class="badge badge-rollback"
+                                        >Rollback</span
+                                    >
+                                {/if}
                             </div>
                             <div class="job-card-details">
                                 <span class="monospace text-sm"
@@ -207,6 +225,7 @@
                         <thead>
                             <tr>
                                 <th>Conteneur</th>
+                                <th>Type</th>
                                 <th>Serveur</th>
                                 <th>Image</th>
                                 <th>Tag cible</th>
@@ -214,6 +233,7 @@
                                 <th>Démarré</th>
                                 <th>Durée</th>
                                 <th>Erreur</th>
+                                <th>Actions</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -223,6 +243,17 @@
                                         ><strong>{job.container_name}</strong
                                         ></td
                                     >
+                                    <td>
+                                        {#if job.job_type === "rollback"}
+                                            <span class="badge badge-rollback"
+                                                >Rollback</span
+                                            >
+                                        {:else}
+                                            <span class="badge badge-update"
+                                                >Update</span
+                                            >
+                                        {/if}
+                                    </td>
                                     <td>{job.server_name}</td>
                                     <td class="monospace image-cell"
                                         >{job.image}</td
@@ -259,6 +290,42 @@
                                                       ) + "..."
                                                     : job.error_message}
                                             </span>
+                                        {:else}
+                                            —
+                                        {/if}
+                                    </td>
+                                    <td>
+                                        {#if job.previous_image && job.job_type !== "rollback"}
+                                            <button
+                                                class="btn btn-rollback"
+                                                on:click={() =>
+                                                    handleRollback(job)}
+                                                disabled={rollingBack ===
+                                                    job.id}
+                                                title="Revenir à {job.previous_image}"
+                                            >
+                                                {#if rollingBack === job.id}
+                                                    <span class="spinner-sm"
+                                                    ></span>
+                                                {:else}
+                                                    <svg
+                                                        viewBox="0 0 24 24"
+                                                        fill="none"
+                                                        stroke="currentColor"
+                                                        stroke-width="2"
+                                                        width="14"
+                                                        height="14"
+                                                    >
+                                                        <polyline
+                                                            points="1 4 1 10 7 10"
+                                                        ></polyline>
+                                                        <path
+                                                            d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"
+                                                        ></path>
+                                                    </svg>
+                                                {/if}
+                                                Rollback
+                                            </button>
                                         {:else}
                                             —
                                         {/if}
@@ -421,6 +488,41 @@
 
     .job-failed {
         background: rgba(239, 68, 68, 0.05);
+    }
+
+    .badge-rollback {
+        background: rgba(168, 85, 247, 0.15);
+        color: #a855f7;
+    }
+
+    .badge-update {
+        background: rgba(59, 130, 246, 0.15);
+        color: #3b82f6;
+    }
+
+    .btn-rollback {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        padding: 4px 10px;
+        font-size: 0.8rem;
+        background: rgba(168, 85, 247, 0.1);
+        color: #a855f7;
+        border: 1px solid rgba(168, 85, 247, 0.3);
+        border-radius: var(--border-radius);
+        cursor: pointer;
+        transition: all 0.2s;
+        white-space: nowrap;
+    }
+
+    .btn-rollback:hover:not(:disabled) {
+        background: rgba(168, 85, 247, 0.2);
+        border-color: #a855f7;
+    }
+
+    .btn-rollback:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
     }
 
     .text-sm {

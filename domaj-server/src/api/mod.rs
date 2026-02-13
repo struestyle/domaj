@@ -76,6 +76,7 @@ pub fn router(jwt_secret: String) -> Router<Arc<AppState>> {
         
         // Update jobs
         .route("/update-jobs", get(containers::list_update_jobs))
+        .route("/update-jobs/:id/rollback", post(containers::rollback_job))
         
         // Actions
         .route("/scan", post(containers::trigger_scan))

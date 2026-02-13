@@ -135,3 +135,9 @@ export async function deleteRegistryCredential(id) {
 export async function getUpdateJobs() {
     return fetchApi('/update-jobs');
 }
+
+export async function rollbackJob(jobId) {
+    return fetchApi(`/update-jobs/${jobId}/rollback`, {
+        method: 'POST'
+    });
+}

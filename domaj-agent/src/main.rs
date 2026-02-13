@@ -235,12 +235,13 @@ async fn get_container(
         None => Err(StatusCode::NOT_FOUND),
     }
 }
-
 /// Request body for container update
 #[derive(Debug, Deserialize)]
 pub struct UpdateRequest {
     /// Optional target tag to update to
     pub target_tag: Option<String>,
+    /// Optional full target image (for rollback). Takes priority over target_tag.
+    pub target_image: Option<String>,
 }
 
 /// Update a container to a new image
@@ -253,7 +254,7 @@ async fn update_container(
     check_api_key(&headers, &state.config.api_key)
         .map_err(|_| (StatusCode::UNAUTHORIZED, Json(serde_json::json!({"error": "Unauthorized"}))))?;
     
-    tracing::info!("🔄 Received update request for container '{}' (target_tag: {:?})", name, body.target_tag);
+    tracing::info!("🔄 Received update request for container '{}' (target_tag: {:?}, target_image: {:?})", name, body.target_tag, body.target_image);
     
     // First get the container to determine its image
     let container = state.docker.get_container(&name).await.map_err(|e| {
@@ -269,8 +270,13 @@ async fn update_container(
         })))
     })?;
     
-    // Determine the image to pull (with target tag if specified)
-    let pull_image = if let Some(ref tag) = body.target_tag {
+    // Determine the image to pull:
+    // 1. target_image (full image ref, for rollback) takes priority
+    // 2. target_tag (just a tag, for normal updates)
+    // 3. fallback: re-pull current image
+    let pull_image = if let Some(ref img) = body.target_image {
+        img.clone()
+    } else if let Some(ref tag) = body.target_tag {
         let base = container.image.split(':').next().unwrap_or(&container.image);
         format!("{}:{}", base, tag)
     } else {
@@ -284,7 +290,7 @@ async fn update_container(
     }
     
     let result = state.docker
-        .update_container(&name, body.target_tag.as_deref(), credentials)
+        .update_container(&name, Some(&pull_image), credentials)
         .await
         .map_err(|e| {
             tracing::error!("Failed to update container {}: {}", name, e);

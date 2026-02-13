@@ -185,18 +185,24 @@
             on:click={triggerScan}
             disabled={scanning}
         >
-            <svg
-                class="btn-icon"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="2"
-                class:spin={scanning}
-            >
-                <circle cx="11" cy="11" r="8"></circle>
-                <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
-            </svg>
-            {scanning ? "Scan en cours..." : "Scanner"}
+            {#if scanning}
+                <span class="spinner"></span>
+                Scan en cours...
+            {:else}
+                <svg
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    width="16"
+                    height="16"
+                    style="vertical-align: middle; margin-right: 6px;"
+                >
+                    <circle cx="11" cy="11" r="8"></circle>
+                    <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                </svg>
+                Scanner
+            {/if}
         </button>
     </header>
 

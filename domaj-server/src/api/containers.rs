@@ -239,15 +239,16 @@ pub async fn update_container(
         body.target_tag
     );
 
-    // Create job in database
+    // Create job in database (store current image as previous_image for rollback)
     let job_id: i64 = sqlx::query_scalar(
-        "INSERT INTO update_jobs (container_id, container_name, server_name, image, target_tag, status) VALUES (?, ?, ?, ?, ?, 'running') RETURNING id"
+        "INSERT INTO update_jobs (container_id, container_name, server_name, image, target_tag, previous_image, job_type, status) VALUES (?, ?, ?, ?, ?, ?, 'update', 'running') RETURNING id"
     )
     .bind(container.id)
     .bind(&container.name)
     .bind(&server.name)
     .bind(&container.image)
     .bind(&body.target_tag)
+    .bind(&container.image)
     .fetch_one(&state.db)
     .await
     .map_err(|e| {
@@ -397,3 +398,169 @@ pub async fn list_update_jobs(
     Ok(Json(jobs))
 }
 
+/// Rollback a container to its previous image
+pub async fn rollback_job(
+    State(state): State<Arc<AppState>>,
+    Path(job_id): Path<i64>,
+) -> Result<(StatusCode, Json<serde_json::Value>), (StatusCode, Json<serde_json::Value>)> {
+    // Get the original job
+    let original_job: crate::db::UpdateJob = sqlx::query_as(
+        "SELECT * FROM update_jobs WHERE id = ?"
+    )
+    .bind(job_id)
+    .fetch_optional(&state.db)
+    .await
+    .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": "Database error"}))))?
+    .ok_or_else(|| (StatusCode::NOT_FOUND, Json(serde_json::json!({"error": "Job non trouvé"}))))?;
+
+    let previous_image = original_job.previous_image.ok_or_else(|| {
+        (StatusCode::BAD_REQUEST, Json(serde_json::json!({"error": "Pas d'image précédente enregistrée pour ce job"})))
+    })?;
+
+    // Get the server for this container
+    let server: crate::db::Server = sqlx::query_as(
+        "SELECT s.* FROM servers s JOIN containers c ON c.server_id = s.id WHERE c.id = ?"
+    )
+    .bind(original_job.container_id)
+    .fetch_optional(&state.db)
+    .await
+    .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": "Database error"}))))?
+    .ok_or_else(|| (StatusCode::NOT_FOUND, Json(serde_json::json!({"error": "Serveur non trouvé"}))))?;
+
+    tracing::info!(
+        "⏪ Rollback requested for container {} on {} -> {}",
+        original_job.container_name,
+        server.name,
+        previous_image
+    );
+
+    // Create rollback job
+    let rollback_job_id: i64 = sqlx::query_scalar(
+        "INSERT INTO update_jobs (container_id, container_name, server_name, image, previous_image, job_type, status) VALUES (?, ?, ?, ?, ?, 'rollback', 'running') RETURNING id"
+    )
+    .bind(original_job.container_id)
+    .bind(&original_job.container_name)
+    .bind(&server.name)
+    .bind(&previous_image)
+    .bind(&original_job.image)
+    .fetch_one(&state.db)
+    .await
+    .map_err(|e| {
+        tracing::error!("Failed to create rollback job: {}", e);
+        (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": "Failed to create job"})))
+    })?;
+
+    // Broadcast job started
+    let _ = state.broadcast_tx.send(serde_json::json!({
+        "type": "job_started",
+        "job": {
+            "id": rollback_job_id,
+            "container_name": original_job.container_name,
+            "server_name": server.name,
+            "image": previous_image,
+            "job_type": "rollback",
+            "status": "running"
+        }
+    }).to_string());
+
+    // Spawn background task
+    let state_clone = state.clone();
+    let container_name = original_job.container_name.clone();
+    let container_id = original_job.container_id;
+    let server_endpoint = server.endpoint.clone();
+    let api_secret = state.config.api_secret.clone();
+    let target_image = previous_image.clone();
+
+    tokio::spawn(async move {
+        let client = reqwest::Client::new();
+        let agent_url = format!(
+            "{}/containers/{}/update",
+            server_endpoint.trim_end_matches('/'),
+            container_name
+        );
+
+        let result = client
+            .post(&agent_url)
+            .header("X-API-Key", &api_secret)
+            .json(&serde_json::json!({
+                "target_image": target_image
+            }))
+            .send()
+            .await;
+
+        match result {
+            Ok(response) if response.status().is_success() => {
+                tracing::info!("✅ Rollback of {} completed successfully", container_name);
+                let _ = sqlx::query(
+                    "UPDATE update_jobs SET status = 'success', completed_at = CURRENT_TIMESTAMP WHERE id = ?"
+                )
+                .bind(rollback_job_id)
+                .execute(&state_clone.db)
+                .await;
+
+                let _ = state_clone.broadcast_tx.send(serde_json::json!({
+                    "type": "job_completed",
+                    "job": {
+                        "id": rollback_job_id,
+                        "container_name": container_name,
+                        "status": "success"
+                    }
+                }).to_string());
+            }
+            Ok(response) => {
+                let error_body = response.json::<serde_json::Value>().await.unwrap_or_default();
+                let error_msg = error_body.get("error")
+                    .and_then(|e| e.as_str())
+                    .unwrap_or("Agent error")
+                    .to_string();
+                tracing::error!("Rollback failed for {}: {}", container_name, error_msg);
+
+                let _ = sqlx::query(
+                    "UPDATE update_jobs SET status = 'failed', error_message = ?, completed_at = CURRENT_TIMESTAMP WHERE id = ?"
+                )
+                .bind(&error_msg)
+                .bind(rollback_job_id)
+                .execute(&state_clone.db)
+                .await;
+
+                let _ = state_clone.broadcast_tx.send(serde_json::json!({
+                    "type": "job_failed",
+                    "job": {
+                        "id": rollback_job_id,
+                        "container_name": container_name,
+                        "status": "failed",
+                        "error": error_msg
+                    }
+                }).to_string());
+            }
+            Err(e) => {
+                let error_msg = format!("Failed to contact agent: {}", e);
+                tracing::error!("{}", error_msg);
+
+                let _ = sqlx::query(
+                    "UPDATE update_jobs SET status = 'failed', error_message = ?, completed_at = CURRENT_TIMESTAMP WHERE id = ?"
+                )
+                .bind(&error_msg)
+                .bind(rollback_job_id)
+                .execute(&state_clone.db)
+                .await;
+
+                let _ = state_clone.broadcast_tx.send(serde_json::json!({
+                    "type": "job_failed",
+                    "job": {
+                        "id": rollback_job_id,
+                        "container_name": container_name,
+                        "status": "failed",
+                        "error": error_msg
+                    }
+                }).to_string());
+            }
+        }
+    });
+
+    Ok((StatusCode::ACCEPTED, Json(serde_json::json!({
+        "status": "accepted",
+        "job_id": rollback_job_id,
+        "message": "Rollback job started"
+    }))))
+}

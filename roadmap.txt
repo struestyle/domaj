@@ -10,18 +10,11 @@
 
 ## Version 1.1 - Notifications Avancées
 - [x] Intégration Telegram (API Bot via reqwest)
-- [ ] Intégration Discord (serenity/webhook)
-- [ ] Intégration Slack (webhook)
-- [ ] WhatsApp Business API (si demandé)
 
 ## Version 1.2 - Registres Privés & Database
 - [ ] Support PostgreSQL comme base de données externe
 - [ ] Migration SQLite vers PostgreSQL
 - [x] Support Harbor
-- [ ] Support GitLab Container Registry
-- [ ] Support AWS ECR
-- [ ] Support Azure ACR
-- [ ] Support Google Artifact Registry
 - [x] Gestion des credentials par registre
 
 ## Version 1.3 - Actions Automatiques
@@ -53,6 +46,15 @@
 - [ ] Tags personnalisés sur conteneurs
 - [ ] Filtres et recherche avancée
 - [ ] Export des rapports (PDF/CSV)
+
+## Hors MVP
+- [ ] Intégration Discord (webhook)
+- [ ] Intégration Slack (webhook)
+- [ ] WhatsApp Business API
+- [ ] Support GitLab Container Registry
+- [ ] Support AWS ECR
+- [ ] Support Azure ACR
+- [ ] Support Google Artifact Registry
 
 ## Idées Futures
 - Support Kubernetes (pods, deployments)
