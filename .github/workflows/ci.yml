@@ -61,17 +61,17 @@ jobs:
           echo "tags=${TAGS}" >> "$GITHUB_OUTPUT"
           echo "Generated tags: ${TAGS}"
 
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
       - name: Build and push
-        run: |
-          IFS=',' read -ra TAG_ARRAY <<< "${{ steps.tags.outputs.tags }}"
-          BUILD_ARGS=""
-          for TAG in "${TAG_ARRAY[@]}"; do
-            BUILD_ARGS="${BUILD_ARGS} -t ${TAG}"
-          done
-          docker build ${BUILD_ARGS} ${{ matrix.context }}
-          for TAG in "${TAG_ARRAY[@]}"; do
-            docker push "${TAG}"
-          done
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          push: true
+          tags: ${{ steps.tags.outputs.tags }}
+          cache-from: type=gha,scope=${{ matrix.component }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.component }}
 
   security-audit:
     name: Security Audit (${{ matrix.component }})
