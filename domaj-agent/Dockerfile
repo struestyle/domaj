@@ -27,8 +27,9 @@ RUN apk add --no-cache ca-certificates
 
 WORKDIR /app
 
-# Copy the binary
+# Copy the binary and dependency manifest (for Trivy vulnerability scanning)
 COPY --from=builder /app/target/release/domaj-agent /app/domaj-agent
+COPY --from=builder /app/Cargo.lock /app/Cargo.lock
 
 EXPOSE 3001
 

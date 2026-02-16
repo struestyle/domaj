@@ -27,8 +27,9 @@ RUN apk add --no-cache ca-certificates
 
 WORKDIR /app
 
-# Copy the binary
+# Copy the binary and dependency manifest (for Trivy vulnerability scanning)
 COPY --from=builder /app/target/release/domaj-server /app/domaj-server
+COPY --from=builder /app/Cargo.lock /app/Cargo.lock
 
 # Create data directory
 RUN mkdir -p /data
