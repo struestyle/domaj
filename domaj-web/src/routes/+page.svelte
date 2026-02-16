@@ -83,6 +83,9 @@
         }
     }
 
+    let showPatches = true;
+    let showNew = true;
+
     $: sortedUpdates = [...updates].sort((a, b) => {
         let aVal, bVal;
 
@@ -109,6 +112,12 @@
         if (aVal < bVal) return sortDirection === "asc" ? -1 : 1;
         if (aVal > bVal) return sortDirection === "asc" ? 1 : -1;
         return 0;
+    });
+
+    $: filteredUpdates = sortedUpdates.filter((u) => {
+        if (!showPatches && u.same_tag_update && !u.latest_update) return false;
+        if (!showNew && u.latest_update && !u.same_tag_update) return false;
+        return true;
     });
 
     async function copyToClipboard(text, id) {
@@ -335,6 +344,18 @@
                         </svg>
                         Mises à jour disponibles
                     </h2>
+                    <div class="filter-toggles">
+                        <label class="toggle-switch">
+                            <input type="checkbox" bind:checked={showPatches} />
+                            <span class="toggle-slider"></span>
+                            <span class="toggle-label">Patch</span>
+                        </label>
+                        <label class="toggle-switch">
+                            <input type="checkbox" bind:checked={showNew} />
+                            <span class="toggle-slider"></span>
+                            <span class="toggle-label">Nouveau</span>
+                        </label>
+                    </div>
                 </div>
 
                 <div class="table-container card">
@@ -406,7 +427,7 @@
                             </tr>
                         </thead>
                         <tbody>
-                            {#each sortedUpdates as update}
+                            {#each filteredUpdates as update}
                                 {@const img = parseImage(update.image)}
                                 <tr>
                                     <td>{update.server_name}</td>
@@ -516,13 +537,21 @@
                                     </td>
                                     <td>
                                         {#if update.versions_behind < 0}
-                                            <span class="badge badge-muted">N/A</span>
+                                            <span class="badge badge-muted"
+                                                >N/A</span
+                                            >
                                         {:else if update.versions_behind === 0}
-                                            <span class="badge badge-success">À jour</span>
+                                            <span class="badge badge-success"
+                                                >À jour</span
+                                            >
                                         {:else if update.versions_behind <= 3}
-                                            <span class="badge badge-warning">{update.versions_behind}</span>
+                                            <span class="badge badge-warning"
+                                                >{update.versions_behind}</span
+                                            >
                                         {:else}
-                                            <span class="badge badge-danger">{update.versions_behind}</span>
+                                            <span class="badge badge-danger"
+                                                >{update.versions_behind}</span
+                                            >
                                         {/if}
                                     </td>
                                     <td>
@@ -944,5 +973,60 @@
         to {
             transform: rotate(360deg);
         }
+    }
+
+    /* Filter toggles */
+    .filter-toggles {
+        display: flex;
+        align-items: center;
+        gap: var(--spacing-md);
+    }
+
+    .toggle-switch {
+        display: flex;
+        align-items: center;
+        gap: var(--spacing-sm);
+        cursor: pointer;
+        user-select: none;
+    }
+
+    .toggle-switch input {
+        display: none;
+    }
+
+    .toggle-slider {
+        position: relative;
+        width: 36px;
+        height: 20px;
+        background: var(--border-color);
+        border-radius: 10px;
+        transition: background var(--transition-fast);
+    }
+
+    .toggle-slider::after {
+        content: "";
+        position: absolute;
+        top: 2px;
+        left: 2px;
+        width: 16px;
+        height: 16px;
+        background: var(--text-muted);
+        border-radius: 50%;
+        transition: all var(--transition-fast);
+    }
+
+    .toggle-switch input:checked + .toggle-slider {
+        background: rgba(34, 197, 94, 0.3);
+    }
+
+    .toggle-switch input:checked + .toggle-slider::after {
+        transform: translateX(16px);
+        background: var(--color-success);
+    }
+
+    .toggle-label {
+        font-size: 0.8rem;
+        color: var(--text-secondary);
+        font-weight: 500;
     }
 </style>
