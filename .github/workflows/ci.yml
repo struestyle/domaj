@@ -70,6 +70,7 @@ jobs:
           context: ${{ matrix.context }}
           push: true
           tags: ${{ steps.tags.outputs.tags }}
+          provenance: false
           cache-from: type=gha,scope=${{ matrix.component }}
           cache-to: type=gha,mode=max,scope=${{ matrix.component }}
 
