@@ -65,6 +65,7 @@
           <a href="/servers" class="nav-link">Serveurs</a>
           <a href="/registries" class="nav-link">Registres</a>
           <a href="/logs" class="nav-link">Logs</a>
+          <a href="/settings" class="nav-link">Paramètres</a>
         </div>
 
         <div class="nav-actions">

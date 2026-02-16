@@ -34,12 +34,14 @@ function createWebSocketStore() {
                 lastEvent.set(data);
 
                 if (data.type === 'job_started') {
-                    const label = data.job.job_type === 'rollback' ? 'Rollback' : 'Mise à jour';
+                    const label = data.job.job_type === 'rollback' ? 'Rollback' : data.job.job_type === 'auto_rollback' ? 'Restauration auto' : 'Mise à jour';
                     toasts.info(`🔄 ${label} démarré : ${data.job.container_name}`);
                 } else if (data.type === 'job_completed') {
-                    toasts.success(`✅ Opération réussie : ${data.job.container_name}`);
+                    const label = data.job.job_type === 'rollback' ? 'Rollback réussi' : data.job.job_type === 'auto_rollback' ? 'Restauration auto réussie' : 'Mise à jour réussie';
+                    toasts.success(`✅ ${label} : ${data.job.container_name}`);
                 } else if (data.type === 'job_failed') {
-                    toasts.error(`❌ Échec : ${data.job.container_name}`);
+                    const label = data.job.job_type === 'rollback' ? 'Échec du rollback' : data.job.job_type === 'auto_rollback' ? 'Échec de la restauration auto' : 'Échec de la mise à jour';
+                    toasts.error(`❌ ${label} : ${data.job.container_name}`);
                 }
             } catch (e) {
                 // ignore parse errors

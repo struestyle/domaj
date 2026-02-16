@@ -21,7 +21,7 @@
     let sortColumn = "container_name";
     let sortDirection = "asc";
     let copiedId = null;
-    let updatingContainer = null;
+    let updatingContainers = new Set();
     let updateError = null;
     let scanning = false;
 
@@ -29,10 +29,20 @@
     const unsubEvent = websocketStore.lastEvent.subscribe(async (event) => {
         if (!event) return;
         if (event.type === "job_completed" || event.type === "job_failed") {
+            // Clear updating state for this container
+            if (event.job?.container_id) {
+                updatingContainers.delete(event.job.container_id);
+                updatingContainers = updatingContainers; // trigger reactivity
+            }
             try {
                 updates = await getUpdates();
             } catch (e) {
                 /* ignore */
+            }
+        } else if (event.type === "job_started") {
+            if (event.job?.container_id) {
+                updatingContainers.add(event.job.container_id);
+                updatingContainers = updatingContainers;
             }
         } else if (event.type === "scan_completed") {
             try {
@@ -154,7 +164,6 @@
     async function handleUpdate(update, type) {
         const containerId = update.container_id;
         updateError = null;
-        updatingContainer = `${containerId}-${type}`;
 
         try {
             let targetTag = null;
@@ -166,11 +175,12 @@
             }
 
             await updateContainer(containerId, targetTag);
+            // Mark as updating — will be cleared by WebSocket job_completed/job_failed
+            updatingContainers.add(containerId);
+            updatingContainers = updatingContainers;
         } catch (err) {
             updateError = err.message;
             console.error("Update failed:", err);
-        } finally {
-            updatingContainer = null;
         }
     }
     async function triggerScan() {
@@ -631,15 +641,16 @@
                                         {#if update.same_tag_update}
                                             <button
                                                 class="btn btn-sm btn-warning"
-                                                disabled={updatingContainer !==
-                                                    null}
+                                                disabled={updatingContainers.has(
+                                                    update.container_id,
+                                                )}
                                                 on:click={() =>
                                                     handleUpdate(
                                                         update,
                                                         "patch",
                                                     )}
                                             >
-                                                {#if updatingContainer === `${update.container_id}-patch`}
+                                                {#if updatingContainers.has(update.container_id)}
                                                     <span class="spinner"
                                                     ></span>
                                                 {:else}
@@ -650,15 +661,16 @@
                                         {#if update.latest_update}
                                             <button
                                                 class="btn btn-sm btn-success"
-                                                disabled={updatingContainer !==
-                                                    null}
+                                                disabled={updatingContainers.has(
+                                                    update.container_id,
+                                                )}
                                                 on:click={() =>
                                                     handleUpdate(
                                                         update,
                                                         "latest",
                                                     )}
                                             >
-                                                {#if updatingContainer === `${update.container_id}-latest`}
+                                                {#if updatingContainers.has(update.container_id)}
                                                     <span class="spinner"
                                                     ></span>
                                                 {:else}

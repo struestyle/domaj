@@ -141,3 +141,14 @@ export async function rollbackJob(jobId) {
         method: 'POST'
     });
 }
+
+export async function getSettings() {
+    return fetchApi('/settings');
+}
+
+export async function updateSetting(key, value) {
+    return fetchApi(`/settings/${key}`, {
+        method: 'PUT',
+        body: JSON.stringify({ value })
+    });
+}

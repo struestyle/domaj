@@ -59,6 +59,12 @@ pub struct Config {
     
     /// Private registry credentials
     pub registry_credentials: Vec<RegistryCredential>,
+    
+    /// Auto-rollback if container exits after update (None = not set by env, modifiable via UI)
+    pub auto_rollback: Option<bool>,
+    
+    /// Delay in seconds before checking container health after update
+    pub auto_rollback_delay_secs: u64,
 }
 
 impl Config {
@@ -130,6 +136,21 @@ impl Config {
             }
         }
         
+        // Auto-rollback configuration
+        let auto_rollback = std::env::var("AUTO_ROLLBACK").ok().map(|v| {
+            v.to_lowercase() == "true" || v == "1"
+        });
+        
+        let auto_rollback_delay_secs = std::env::var("AUTO_ROLLBACK_DELAY")
+            .unwrap_or_else(|_| "30".to_string())
+            .parse()
+            .unwrap_or(30);
+        
+        if auto_rollback.is_some() {
+            tracing::info!("🔄 Auto-rollback configured via env: enabled={}, delay={}s", 
+                auto_rollback.unwrap(), auto_rollback_delay_secs);
+        }
+        
         Ok(Self {
             database_url,
             port,
@@ -147,6 +168,8 @@ impl Config {
             telegram_bot_token,
             telegram_chat_ids,
             registry_credentials,
+            auto_rollback,
+            auto_rollback_delay_secs,
         })
     }
     

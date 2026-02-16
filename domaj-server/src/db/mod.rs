@@ -191,6 +191,25 @@ async fn run_sqlite_migrations(pool: &AnyPool) -> Result<()> {
     .execute(pool)
     .await?;
 
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS settings (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL
+        )
+        "#,
+    )
+    .execute(pool)
+    .await?;
+
+    // Insert default settings if not present
+    sqlx::query("INSERT OR IGNORE INTO settings (key, value) VALUES ('auto_rollback', 'true')")
+        .execute(pool)
+        .await?;
+    sqlx::query("INSERT OR IGNORE INTO settings (key, value) VALUES ('auto_rollback_delay', '30')")
+        .execute(pool)
+        .await?;
+
     tracing::debug!("SQLite migrations completed");
     Ok(())
 }
@@ -311,10 +330,28 @@ async fn run_postgres_migrations(pool: &AnyPool) -> Result<()> {
     .execute(pool)
     .await?;
 
-    // Legacy column migrations (ignored if already present)
     let _ = sqlx::query("ALTER TABLE update_checks ADD COLUMN IF NOT EXISTS version_gap INTEGER NOT NULL DEFAULT -1")
         .execute(pool)
         .await;
+
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS settings (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL
+        )
+        "#,
+    )
+    .execute(pool)
+    .await?;
+
+    // Insert default settings if not present
+    sqlx::query("INSERT INTO settings (key, value) VALUES ('auto_rollback', 'true') ON CONFLICT (key) DO NOTHING")
+        .execute(pool)
+        .await?;
+    sqlx::query("INSERT INTO settings (key, value) VALUES ('auto_rollback_delay', '30') ON CONFLICT (key) DO NOTHING")
+        .execute(pool)
+        .await?;
 
     tracing::debug!("PostgreSQL migrations completed");
     Ok(())

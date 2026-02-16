@@ -270,10 +270,12 @@ pub async fn update_container(
         "type": "job_started",
         "job": {
             "id": job_id,
+            "container_id": container.id,
             "container_name": container.name,
             "server_name": server.name,
             "image": container.image,
             "target_tag": body.target_tag,
+            "job_type": "update",
             "status": "running"
         }
     }).to_string());
@@ -282,9 +284,12 @@ pub async fn update_container(
     let state_clone = state.clone();
     let container_id = container.id;
     let container_name = container.name.clone();
+    let server_name = server.name.clone();
     let server_endpoint = server.endpoint.clone();
     let target_tag = body.target_tag.clone();
     let api_secret = state.config.api_secret.clone();
+    let previous_image = container.image.clone();
+    let current_image = container.image.clone();
 
     tokio::spawn(async move {
         let client = reqwest::Client::new();
@@ -305,15 +310,8 @@ pub async fn update_container(
 
         match result {
             Ok(response) if response.status().is_success() => {
-                tracing::info!("✅ Container {} updated successfully", container_name);
-                // Mark job as success
-                let _ = sqlx::query(
-                    "UPDATE update_jobs SET status = 'success', completed_at = CURRENT_TIMESTAMP WHERE id = $1"
-                )
-                .bind(job_id)
-                .execute(&state_clone.db)
-                .await;
-
+                tracing::info!("✅ Container {} updated successfully, starting health check...", container_name);
+                
                 // Clear update_checks so the container disappears from the updates list
                 let _ = sqlx::query(
                     "DELETE FROM update_checks WHERE container_id = $1"
@@ -322,14 +320,195 @@ pub async fn update_container(
                 .execute(&state_clone.db)
                 .await;
 
-                let _ = state_clone.broadcast_tx.send(serde_json::json!({
-                    "type": "job_completed",
-                    "job": {
-                        "id": job_id,
-                        "container_name": container_name,
-                        "status": "success"
+                // Check if auto-rollback is enabled
+                let auto_rollback_enabled = crate::api::settings::get_auto_rollback_enabled(&state_clone).await;
+                let rollback_delay = crate::api::settings::get_auto_rollback_delay(&state_clone).await;
+                
+                if auto_rollback_enabled {
+                    tracing::info!("🔍 Health check scheduled for {} in {}s", container_name, rollback_delay);
+                    tokio::time::sleep(std::time::Duration::from_secs(rollback_delay)).await;
+                    
+                    // Query the agent for container status
+                    let check_url = format!(
+                        "{}/containers/{}",
+                        server_endpoint.trim_end_matches('/'),
+                        container_name
+                    );
+                    
+                    let check_result = client
+                        .get(&check_url)
+                        .header("X-API-Key", &api_secret)
+                        .send()
+                        .await;
+                    
+                    let container_healthy = match check_result {
+                        Ok(resp) if resp.status().is_success() => {
+                            if let Ok(info) = resp.json::<serde_json::Value>().await {
+                                let status = info.get("status")
+                                    .and_then(|s| s.as_str())
+                                    .unwrap_or("unknown");
+                                tracing::info!("🔍 Container {} status after update: {}", container_name, status);
+                                status == "running"
+                            } else {
+                                tracing::warn!("⚠️ Could not parse container status for {}", container_name);
+                                true // Assume healthy if we can't parse
+                            }
+                        }
+                        _ => {
+                            tracing::warn!("⚠️ Could not reach agent to check {} status", container_name);
+                            true // Assume healthy if agent is unreachable
+                        }
+                    };
+                    
+                    if container_healthy {
+                        // Container is running fine, mark as success
+                        let _ = sqlx::query(
+                            "UPDATE update_jobs SET status = 'success', completed_at = CURRENT_TIMESTAMP WHERE id = $1"
+                        )
+                        .bind(job_id)
+                        .execute(&state_clone.db)
+                        .await;
+
+                        let _ = state_clone.broadcast_tx.send(serde_json::json!({
+                            "type": "job_completed",
+                            "job": {
+                                "id": job_id,
+                                "container_id": container_id,
+                                "container_name": container_name,
+                                "job_type": "update",
+                                "status": "success"
+                            }
+                        }).to_string());
+                    } else {
+                        // Container crashed! Trigger auto-rollback
+                        tracing::warn!("⚠️ Container {} is NOT running after update, triggering auto-rollback!", container_name);
+                        
+                        let _ = sqlx::query(
+                            "UPDATE update_jobs SET status = 'failed', error_message = 'Container exited after update - auto-rollback triggered', completed_at = CURRENT_TIMESTAMP WHERE id = $1"
+                        )
+                        .bind(job_id)
+                        .execute(&state_clone.db)
+                        .await;
+                        
+                        let _ = state_clone.broadcast_tx.send(serde_json::json!({
+                            "type": "job_failed",
+                            "job": {
+                                "id": job_id,
+                                "container_id": container_id,
+                                "container_name": container_name,
+                                "job_type": "update",
+                                "status": "failed",
+                                "error": "Container exited after update - auto-rollback triggered"
+                            }
+                        }).to_string());
+                        
+                        // Create auto-rollback job
+                        let rollback_job_id: Result<i64, _> = sqlx::query_scalar(
+                            "INSERT INTO update_jobs (container_id, container_name, server_name, image, previous_image, job_type, status) VALUES ($1, $2, $3, $4, $5, 'auto_rollback', 'running') RETURNING id"
+                        )
+                        .bind(container_id)
+                        .bind(&container_name)
+                        .bind(&server_name)
+                        .bind(&previous_image)
+                        .bind(&current_image)
+                        .fetch_one(&state_clone.db)
+                        .await;
+                        
+                        if let Ok(rb_job_id) = rollback_job_id {
+                            let _ = state_clone.broadcast_tx.send(serde_json::json!({
+                                "type": "job_started",
+                                "job": {
+                                    "id": rb_job_id,
+                                    "container_id": container_id,
+                                    "container_name": container_name,
+                                    "server_name": server_name,
+                                    "image": previous_image,
+                                    "job_type": "auto_rollback",
+                                    "status": "running"
+                                }
+                            }).to_string());
+                            
+                            // Execute rollback
+                            let rollback_url = format!(
+                                "{}/containers/{}/update",
+                                server_endpoint.trim_end_matches('/'),
+                                container_name
+                            );
+                            
+                            let rb_result = client
+                                .post(&rollback_url)
+                                .header("X-API-Key", &api_secret)
+                                .json(&serde_json::json!({
+                                    "target_image": previous_image
+                                }))
+                                .send()
+                                .await;
+                            
+                            match rb_result {
+                                Ok(resp) if resp.status().is_success() => {
+                                    tracing::info!("✅ Auto-rollback of {} completed successfully", container_name);
+                                    let _ = sqlx::query(
+                                        "UPDATE update_jobs SET status = 'success', completed_at = CURRENT_TIMESTAMP WHERE id = $1"
+                                    )
+                                    .bind(rb_job_id)
+                                    .execute(&state_clone.db)
+                                    .await;
+                                    
+                                    let _ = state_clone.broadcast_tx.send(serde_json::json!({
+                                        "type": "job_completed",
+                                        "job": {
+                                            "id": rb_job_id,
+                                            "container_id": container_id,
+                                            "container_name": container_name,
+                                            "status": "success",
+                                            "job_type": "auto_rollback"
+                                        }
+                                    }).to_string());
+                                }
+                                _ => {
+                                    tracing::error!("❌ Auto-rollback of {} FAILED!", container_name);
+                                    let _ = sqlx::query(
+                                        "UPDATE update_jobs SET status = 'failed', error_message = 'Auto-rollback failed', completed_at = CURRENT_TIMESTAMP WHERE id = $1"
+                                    )
+                                    .bind(rb_job_id)
+                                    .execute(&state_clone.db)
+                                    .await;
+                                    
+                                    let _ = state_clone.broadcast_tx.send(serde_json::json!({
+                                        "type": "job_failed",
+                                        "job": {
+                                            "id": rb_job_id,
+                                            "container_id": container_id,
+                                            "container_name": container_name,
+                                            "status": "failed",
+                                            "job_type": "auto_rollback",
+                                            "error": "Auto-rollback failed"
+                                        }
+                                    }).to_string());
+                                }
+                            }
+                        }
                     }
-                }).to_string());
+                } else {
+                    // Auto-rollback disabled, just mark success immediately
+                    let _ = sqlx::query(
+                        "UPDATE update_jobs SET status = 'success', completed_at = CURRENT_TIMESTAMP WHERE id = $1"
+                    )
+                    .bind(job_id)
+                    .execute(&state_clone.db)
+                    .await;
+
+                    let _ = state_clone.broadcast_tx.send(serde_json::json!({
+                        "type": "job_completed",
+                        "job": {
+                            "id": job_id,
+                            "container_id": container_id,
+                            "container_name": container_name,
+                            "job_type": "update",
+                            "status": "success"
+                        }
+                    }).to_string());
+                }
             }
             Ok(response) => {
                 let status = response.status();
@@ -352,7 +531,9 @@ pub async fn update_container(
                     "type": "job_failed",
                     "job": {
                         "id": job_id,
+                        "container_id": container_id,
                         "container_name": container_name,
+                        "job_type": "update",
                         "status": "failed",
                         "error": error_msg
                     }
@@ -374,7 +555,9 @@ pub async fn update_container(
                     "type": "job_failed",
                     "job": {
                         "id": job_id,
+                        "container_id": container_id,
                         "container_name": container_name,
+                        "job_type": "update",
                         "status": "failed",
                         "error": error_msg
                     }
@@ -465,6 +648,7 @@ pub async fn rollback_job(
         "type": "job_started",
         "job": {
             "id": rollback_job_id,
+            "container_id": original_job.container_id,
             "container_name": original_job.container_name,
             "server_name": server.name,
             "image": previous_image,
@@ -476,7 +660,7 @@ pub async fn rollback_job(
     // Spawn background task
     let state_clone = state.clone();
     let container_name = original_job.container_name.clone();
-    let _container_id = original_job.container_id;
+    let container_id = original_job.container_id;
     let server_endpoint = server.endpoint.clone();
     let api_secret = state.config.api_secret.clone();
     let target_image = previous_image.clone();
@@ -512,7 +696,9 @@ pub async fn rollback_job(
                     "type": "job_completed",
                     "job": {
                         "id": rollback_job_id,
+                        "container_id": container_id,
                         "container_name": container_name,
+                        "job_type": "rollback",
                         "status": "success"
                     }
                 }).to_string());
@@ -537,7 +723,9 @@ pub async fn rollback_job(
                     "type": "job_failed",
                     "job": {
                         "id": rollback_job_id,
+                        "container_id": container_id,
                         "container_name": container_name,
+                        "job_type": "rollback",
                         "status": "failed",
                         "error": error_msg
                     }
@@ -559,7 +747,9 @@ pub async fn rollback_job(
                     "type": "job_failed",
                     "job": {
                         "id": rollback_job_id,
+                        "container_id": container_id,
                         "container_name": container_name,
+                        "job_type": "rollback",
                         "status": "failed",
                         "error": error_msg
                     }
