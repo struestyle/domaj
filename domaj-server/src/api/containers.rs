@@ -429,7 +429,7 @@ pub async fn rollback_job(
 
     // Get the server for this container
     let server: crate::db::Server = sqlx::query_as(
-        &format!("SELECT s.id, s.name, s.endpoint, s.api_key, COALESCE(s.agent_id, '') AS agent_id, COALESCE(s.last_seen, '') AS last_seen, s.created_at FROM servers s JOIN containers c ON c.server_id = s.id WHERE c.id = $1")
+        &format!("SELECT s.id, s.name, s.endpoint, s.api_key, COALESCE(s.agent_id, '') AS agent_id, COALESCE(s.last_seen, '') AS last_seen, CAST(s.created_at AS TEXT) AS created_at FROM servers s JOIN containers c ON c.server_id = s.id WHERE c.id = $1")
     )
     .bind(original_job.container_id)
     .fetch_optional(&state.db)

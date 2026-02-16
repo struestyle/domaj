@@ -8,12 +8,12 @@ mod models;
 pub use models::*;
 
 /// SQL SELECT fragments with COALESCE for nullable fields (required by sqlx::Any driver)
-pub const SELECT_SERVERS: &str = "id, name, endpoint, api_key, COALESCE(agent_id, '') AS agent_id, COALESCE(last_seen, '') AS last_seen, created_at";
-pub const SELECT_CONTAINERS: &str = "id, server_id, container_id, name, image, COALESCE(image_digest, '') AS image_digest, COALESCE(architecture, '') AS architecture, status, created_at, COALESCE(last_checked, '') AS last_checked";
-pub const SELECT_UPDATE_CHECKS: &str = "id, container_id, check_type, local_digest, COALESCE(remote_digest, '') AS remote_digest, has_update, COALESCE(latest_tag, '') AS latest_tag, version_gap, checked_at";
-pub const SELECT_UPDATE_JOBS: &str = "id, container_id, container_name, server_name, image, COALESCE(target_tag, '') AS target_tag, status, COALESCE(error_message, '') AS error_message, COALESCE(previous_image, '') AS previous_image, job_type, started_at, COALESCE(completed_at, '') AS completed_at";
-pub const SELECT_REGISTRY_CREDS: &str = "id, host, username, password, created_at";
-pub const SELECT_USERS: &str = "id, username, password_hash, role, created_at";
+pub const SELECT_SERVERS: &str = "id, name, endpoint, api_key, COALESCE(agent_id, '') AS agent_id, COALESCE(last_seen, '') AS last_seen, CAST(created_at AS TEXT) AS created_at";
+pub const SELECT_CONTAINERS: &str = "id, server_id, container_id, name, image, COALESCE(image_digest, '') AS image_digest, COALESCE(architecture, '') AS architecture, status, CAST(created_at AS TEXT) AS created_at, COALESCE(CAST(last_checked AS TEXT), '') AS last_checked";
+pub const SELECT_UPDATE_CHECKS: &str = "id, container_id, check_type, local_digest, COALESCE(remote_digest, '') AS remote_digest, has_update, COALESCE(latest_tag, '') AS latest_tag, version_gap, CAST(checked_at AS TEXT) AS checked_at";
+pub const SELECT_UPDATE_JOBS: &str = "id, container_id, container_name, server_name, image, COALESCE(target_tag, '') AS target_tag, status, COALESCE(error_message, '') AS error_message, COALESCE(previous_image, '') AS previous_image, job_type, CAST(started_at AS TEXT) AS started_at, COALESCE(CAST(completed_at AS TEXT), '') AS completed_at";
+pub const SELECT_REGISTRY_CREDS: &str = "id, host, username, password, CAST(created_at AS TEXT) AS created_at";
+pub const SELECT_USERS: &str = "id, username, password_hash, role, CAST(created_at AS TEXT) AS created_at";
 
 use anyhow::Result;
 use sqlx::any::AnyPoolOptions;
@@ -68,8 +68,8 @@ async fn run_sqlite_migrations(pool: &AnyPool) -> Result<()> {
             endpoint TEXT NOT NULL,
             api_key TEXT NOT NULL,
             agent_id TEXT UNIQUE,
-            last_seen DATETIME,
-            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+            last_seen TEXT,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
         )
         "#,
     )
@@ -87,8 +87,8 @@ async fn run_sqlite_migrations(pool: &AnyPool) -> Result<()> {
             image_digest TEXT,
             architecture TEXT,
             status TEXT NOT NULL,
-            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            last_checked DATETIME,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            last_checked TEXT,
             FOREIGN KEY (server_id) REFERENCES servers(id) ON DELETE CASCADE
         )
         "#,
@@ -107,7 +107,7 @@ async fn run_sqlite_migrations(pool: &AnyPool) -> Result<()> {
             has_update INTEGER NOT NULL DEFAULT 0,
             latest_tag TEXT,
             version_gap INTEGER NOT NULL DEFAULT -1,
-            checked_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            checked_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (container_id) REFERENCES containers(id) ON DELETE CASCADE
         )
         "#,
@@ -122,7 +122,7 @@ async fn run_sqlite_migrations(pool: &AnyPool) -> Result<()> {
             username TEXT NOT NULL UNIQUE,
             password_hash TEXT NOT NULL,
             role TEXT NOT NULL DEFAULT 'user',
-            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
         )
         "#,
     )
@@ -150,8 +150,8 @@ async fn run_sqlite_migrations(pool: &AnyPool) -> Result<()> {
             error_message TEXT,
             previous_image TEXT,
             job_type TEXT NOT NULL DEFAULT 'update',
-            started_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            completed_at DATETIME,
+            started_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            completed_at TEXT,
             FOREIGN KEY (container_id) REFERENCES containers(id) ON DELETE CASCADE
         )
         "#,
@@ -184,7 +184,7 @@ async fn run_sqlite_migrations(pool: &AnyPool) -> Result<()> {
             host TEXT NOT NULL UNIQUE,
             username TEXT NOT NULL,
             password TEXT NOT NULL,
-            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
         )
         "#,
     )
