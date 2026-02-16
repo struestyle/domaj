@@ -70,6 +70,7 @@ pub struct Container {
 
 /// Container with server information for API responses
 #[derive(Debug, Clone, Serialize)]
+#[allow(dead_code)]
 pub struct ContainerWithServer {
     #[serde(flatten)]
     pub container: Container,
@@ -141,6 +142,7 @@ pub struct UpdateSummary {
 /// Criticality level for updates
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
+#[allow(dead_code)]
 pub enum Criticality {
     /// Patch version update (x.x.PATCH)
     Low,

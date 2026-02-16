@@ -14,6 +14,7 @@ pub use docker_hub::DockerHubClient;
 
 /// Information about a remote image
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(dead_code)]
 pub struct RemoteImageInfo {
     /// Full image reference (e.g., "nginx:1.25")
     pub image: String,
@@ -74,6 +75,7 @@ impl ImageReference {
 }
 
 /// Trait for registry clients
+#[allow(dead_code)]
 pub trait RegistryClient: Send + Sync {
     /// Get the digest for a specific image tag
     fn get_digest(

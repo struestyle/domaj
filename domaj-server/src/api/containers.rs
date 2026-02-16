@@ -476,7 +476,7 @@ pub async fn rollback_job(
     // Spawn background task
     let state_clone = state.clone();
     let container_name = original_job.container_name.clone();
-    let container_id = original_job.container_id;
+    let _container_id = original_job.container_id;
     let server_endpoint = server.endpoint.clone();
     let api_secret = state.config.api_secret.clone();
     let target_image = previous_image.clone();
