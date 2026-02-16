@@ -43,7 +43,7 @@ pub async fn get_all_credentials(state: &AppState) -> Vec<RegistryCredential> {
 
     // Add DB credentials that don't conflict with env ones
     let db_creds: Vec<DbRegistryCredential> = sqlx::query_as(
-        "SELECT * FROM registry_credentials"
+        &format!("SELECT {} FROM registry_credentials", crate::db::SELECT_REGISTRY_CREDS)
     )
     .fetch_all(&state.db)
     .await
@@ -88,7 +88,7 @@ pub async fn list_registries(
 
     // Load DB credentials
     let db_creds: Vec<DbRegistryCredential> = sqlx::query_as(
-        "SELECT * FROM registry_credentials"
+        &format!("SELECT {} FROM registry_credentials", crate::db::SELECT_REGISTRY_CREDS)
     )
     .fetch_all(&state.db)
     .await
@@ -204,7 +204,7 @@ pub async fn create_credential(
     }
 
     sqlx::query(
-        "INSERT INTO registry_credentials (host, username, password) VALUES (?, ?, ?)"
+        "INSERT INTO registry_credentials (host, username, password) VALUES ($1, $2, $3)"
     )
     .bind(&input.host)
     .bind(&input.username)
@@ -238,7 +238,7 @@ pub async fn update_credential(
     Json(input): Json<CredentialInput>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
     let result = sqlx::query(
-        "UPDATE registry_credentials SET host = ?, username = ?, password = ? WHERE id = ?"
+        "UPDATE registry_credentials SET host = $1, username = $2, password = $3 WHERE id = $4"
     )
     .bind(&input.host)
     .bind(&input.username)
@@ -268,7 +268,7 @@ pub async fn delete_credential(
     State(state): State<Arc<AppState>>,
     Path(id): Path<i64>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
-    let result = sqlx::query("DELETE FROM registry_credentials WHERE id = ?")
+    let result = sqlx::query("DELETE FROM registry_credentials WHERE id = $1")
         .bind(id)
         .execute(&state.db)
         .await

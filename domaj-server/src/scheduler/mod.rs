@@ -58,7 +58,7 @@ pub async fn run_scan(state: &AppState) -> Result<()> {
     tracing::info!("Starting full scan...");
     
     // Get all servers
-    let servers: Vec<Server> = sqlx::query_as("SELECT * FROM servers")
+    let servers: Vec<Server> = sqlx::query_as(&format!("SELECT {} FROM servers", crate::db::SELECT_SERVERS))
         .fetch_all(&state.db)
         .await?;
 
@@ -77,7 +77,7 @@ pub async fn run_scan(state: &AppState) -> Result<()> {
 
         // Get containers for this server
         let containers: Vec<Container> = sqlx::query_as(
-            "SELECT * FROM containers WHERE server_id = ?",
+            &format!("SELECT {} FROM containers WHERE server_id = $1", crate::db::SELECT_CONTAINERS),
         )
         .bind(server.id)
         .fetch_all(&state.db)
@@ -150,34 +150,134 @@ async fn sync_server_containers(state: &AppState, server: &Server) -> Result<()>
 
     let agent_containers: Vec<AgentContainer> = response.json().await?;
 
-    // Update database
-    sqlx::query("DELETE FROM containers WHERE server_id = ?")
+    // Upsert containers (preserve existing IDs to keep update_jobs/update_checks)
+    let agent_container_ids: Vec<&str> = agent_containers.iter().map(|c| c.id.as_str()).collect();
+
+    for c in &agent_containers {
+        // Try to update existing container first
+        let updated = sqlx::query(
+            "UPDATE containers SET name = $1, image = $2, image_digest = $3, architecture = $4, status = $5 WHERE server_id = $6 AND container_id = $7",
+        )
+        .bind(&c.name)
+        .bind(&c.image)
+        .bind(c.image_digest.as_deref().unwrap_or(""))
+        .bind(c.architecture.as_deref().unwrap_or(""))
+        .bind(&c.status)
         .bind(server.id)
+        .bind(&c.id)
         .execute(&state.db)
         .await?;
 
-    for c in &agent_containers {
-        sqlx::query(
-            "INSERT INTO containers (server_id, container_id, name, image, image_digest, architecture, status) VALUES (?, ?, ?, ?, ?, ?, ?)",
-        )
-        .bind(server.id)
-        .bind(&c.id)
-        .bind(&c.name)
-        .bind(&c.image)
-        .bind(&c.image_digest)
-        .bind(&c.architecture)
-        .bind(&c.status)
-        .execute(&state.db)
-        .await?;
+        if updated.rows_affected() == 0 {
+            // Container doesn't exist yet, insert it
+            sqlx::query(
+                "INSERT INTO containers (server_id, container_id, name, image, image_digest, architecture, status) VALUES ($1, $2, $3, $4, $5, $6, $7)",
+            )
+            .bind(server.id)
+            .bind(&c.id)
+            .bind(&c.name)
+            .bind(&c.image)
+            .bind(c.image_digest.as_deref().unwrap_or(""))
+            .bind(c.architecture.as_deref().unwrap_or(""))
+            .bind(&c.status)
+            .execute(&state.db)
+            .await?;
+        }
+    }
+
+    // Remove containers that no longer exist on the agent
+    let existing: Vec<(String,)> = sqlx::query_as(
+        "SELECT container_id FROM containers WHERE server_id = $1",
+    )
+    .bind(server.id)
+    .fetch_all(&state.db)
+    .await?;
+
+    for (cid,) in &existing {
+        if !agent_container_ids.contains(&cid.as_str()) {
+            sqlx::query("DELETE FROM containers WHERE server_id = $1 AND container_id = $2")
+                .bind(server.id)
+                .bind(cid)
+                .execute(&state.db)
+                .await?;
+        }
     }
 
     // Update last_seen
-    sqlx::query("UPDATE servers SET last_seen = CURRENT_TIMESTAMP WHERE id = ?")
+    sqlx::query("UPDATE servers SET last_seen = CURRENT_TIMESTAMP WHERE id = $1")
         .bind(server.id)
         .execute(&state.db)
         .await?;
 
     Ok(())
+}
+
+/// Parse a tag string into a semver-like tuple (major, minor, patch)
+/// Handles formats: "1", "1.2", "1.2.3", with optional prefix like "v1.2.3"
+fn parse_semver(tag: &str) -> Option<(u64, u64, u64)> {
+    let tag = tag.strip_prefix('v').unwrap_or(tag);
+    // Strip suffixes like "-alpine", "-slim", "-bullseye" for comparison
+    let version_part = tag.split('-').next().unwrap_or(tag);
+    let parts: Vec<&str> = version_part.split('.').collect();
+    
+    match parts.len() {
+        1 => {
+            let major = parts[0].parse().ok()?;
+            Some((major, 0, 0))
+        }
+        2 => {
+            let major = parts[0].parse().ok()?;
+            let minor = parts[1].parse().ok()?;
+            Some((major, minor, 0))
+        }
+        3 => {
+            let major = parts[0].parse().ok()?;
+            let minor = parts[1].parse().ok()?;
+            let patch = parts[2].parse().ok()?;
+            Some((major, minor, patch))
+        }
+        _ => None,
+    }
+}
+
+/// Count how many versions are newer than `current_tag` in the given tag list.
+/// Only considers tags with the same "family" (depth + suffix pattern).
+fn count_newer_versions(current_tag: &str, all_tags: &[String]) -> i32 {
+    let current = match parse_semver(current_tag) {
+        Some(v) => v,
+        None => return -1, // Not a semver tag
+    };
+
+    // Determine the suffix pattern (e.g., "-alpine") and depth of the current tag
+    let stripped = current_tag.strip_prefix('v').unwrap_or(current_tag);
+    let suffix = stripped.split_once('-').map(|(_, s)| s).unwrap_or("");
+    let depth = stripped.split('-').next().unwrap_or("").split('.').count();
+
+    let mut newer_versions: Vec<(u64, u64, u64)> = Vec::new();
+
+    for tag in all_tags {
+        let t = tag.strip_prefix('v').unwrap_or(tag);
+        
+        // Check suffix matches
+        let tag_suffix = t.split_once('-').map(|(_, s)| s).unwrap_or("");
+        if tag_suffix != suffix {
+            continue;
+        }
+
+        // Check depth matches
+        let tag_depth = t.split('-').next().unwrap_or("").split('.').count();
+        if tag_depth != depth {
+            continue;
+        }
+
+        if let Some(ver) = parse_semver(tag) {
+            if ver > current && !newer_versions.contains(&ver) {
+                newer_versions.push(ver);
+            }
+        }
+    }
+
+    newer_versions.len() as i32
 }
 
 /// Check for updates for a single container
@@ -194,20 +294,49 @@ async fn check_container_updates(state: &AppState, container: &Container) -> Res
     
     let mut has_any_update = false;
 
+    // Fetch all tags for version gap calculation
+    let all_tags = match client.list_tags_dyn(&image_ref.repository).await {
+        Ok(tags) => {
+            tracing::debug!("Found {} tags for {}", tags.len(), container.image);
+            tags
+        }
+        Err(e) => {
+            tracing::debug!("Failed to list tags for {}: {}", container.image, e);
+            Vec::new()
+        }
+    };
+
+    // Calculate version gap
+    let version_gap = if all_tags.is_empty() {
+        -1
+    } else {
+        count_newer_versions(&image_ref.tag, &all_tags)
+    };
+
+    if version_gap > 0 {
+        tracing::info!(
+            "📊 {} is {} version(s) behind (current: {})",
+            container.name,
+            version_gap,
+            image_ref.tag
+        );
+    }
+
     // Check 1: Same tag comparison
     match client.get_digest_dyn(&image_ref.repository, &image_ref.tag).await {
         Ok(remote_digest) => {
-            let local_digest = container.image_digest.clone().unwrap_or_default();
+            let local_digest = container.image_digest.clone();
             let has_update = !local_digest.is_empty() && local_digest != remote_digest;
             
             sqlx::query(
-                "INSERT INTO update_checks (container_id, check_type, local_digest, remote_digest, has_update) VALUES (?, ?, ?, ?, ?)",
+                "INSERT INTO update_checks (container_id, check_type, local_digest, remote_digest, has_update, version_gap) VALUES ($1, $2, $3, $4, $5, $6)",
             )
             .bind(container.id)
             .bind(CheckType::SameTag.to_string())
             .bind(&local_digest)
             .bind(&remote_digest)
-            .bind(has_update)
+            .bind(has_update as i32)
+            .bind(version_gap)
             .execute(&state.db)
             .await?;
 
@@ -230,18 +359,19 @@ async fn check_container_updates(state: &AppState, container: &Container) -> Res
     if image_ref.tag != "latest" {
         match client.get_digest_dyn(&image_ref.repository, "latest").await {
             Ok(latest_digest) => {
-                let local_digest = container.image_digest.clone().unwrap_or_default();
+                let local_digest = container.image_digest.clone();
                 let has_update = !local_digest.is_empty() && local_digest != latest_digest;
                 
                 sqlx::query(
-                    "INSERT INTO update_checks (container_id, check_type, local_digest, remote_digest, has_update, latest_tag) VALUES (?, ?, ?, ?, ?, ?)",
+                    "INSERT INTO update_checks (container_id, check_type, local_digest, remote_digest, has_update, latest_tag, version_gap) VALUES ($1, $2, $3, $4, $5, $6, $7)",
                 )
                 .bind(container.id)
                 .bind(CheckType::Latest.to_string())
                 .bind(&local_digest)
                 .bind(&latest_digest)
-                .bind(has_update)
+                .bind(has_update as i32)
                 .bind("latest")
+                .bind(version_gap)
                 .execute(&state.db)
                 .await?;
 
@@ -261,7 +391,7 @@ async fn check_container_updates(state: &AppState, container: &Container) -> Res
     }
 
     // Update last_checked
-    sqlx::query("UPDATE containers SET last_checked = CURRENT_TIMESTAMP WHERE id = ?")
+    sqlx::query("UPDATE containers SET last_checked = CURRENT_TIMESTAMP WHERE id = $1")
         .bind(container.id)
         .execute(&state.db)
         .await?;

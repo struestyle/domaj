@@ -15,7 +15,7 @@ use crate::AppState;
 pub async fn list_servers(
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<Vec<Server>>, StatusCode> {
-    let servers = sqlx::query_as::<_, Server>("SELECT * FROM servers ORDER BY name")
+    let servers = sqlx::query_as::<_, Server>(&format!("SELECT {} FROM servers ORDER BY name", crate::db::SELECT_SERVERS))
         .fetch_all(&state.db)
         .await
         .map_err(|e| {
@@ -31,7 +31,7 @@ pub async fn get_server(
     State(state): State<Arc<AppState>>,
     Path(id): Path<i64>,
 ) -> Result<Json<Server>, StatusCode> {
-    let server = sqlx::query_as::<_, Server>("SELECT * FROM servers WHERE id = ?")
+    let server = sqlx::query_as::<_, Server>(&format!("SELECT {} FROM servers WHERE id = $1", crate::db::SELECT_SERVERS))
         .bind(id)
         .fetch_optional(&state.db)
         .await
@@ -74,7 +74,7 @@ pub async fn create_server(
     
     // Check for duplicate agent_id
     if let Some(ref aid) = agent_id {
-        let existing = sqlx::query_as::<_, Server>("SELECT * FROM servers WHERE agent_id = ?")
+        let existing = sqlx::query_as::<_, Server>(&format!("SELECT {} FROM servers WHERE agent_id = $1", crate::db::SELECT_SERVERS))
             .bind(aid)
             .fetch_optional(&state.db)
             .await
@@ -92,28 +92,19 @@ pub async fn create_server(
     // Generate a unique API key for this server
     let api_key = Uuid::new_v4().to_string();
 
-    let result = sqlx::query(
-        "INSERT INTO servers (name, endpoint, api_key, agent_id) VALUES (?, ?, ?, ?)",
+    let server: Server = sqlx::query_as(
+        "INSERT INTO servers (name, endpoint, api_key, agent_id) VALUES ($1, $2, $3, $4) RETURNING *",
     )
     .bind(&input.name)
     .bind(&input.endpoint)
     .bind(&api_key)
     .bind(&agent_id)
-    .execute(&state.db)
+    .fetch_one(&state.db)
     .await
     .map_err(|e| {
         tracing::error!("Failed to create server: {}", e);
         (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": "Failed to create server"})))
     })?;
-
-    let server = sqlx::query_as::<_, Server>("SELECT * FROM servers WHERE id = ?")
-        .bind(result.last_insert_rowid())
-        .fetch_one(&state.db)
-        .await
-        .map_err(|e| {
-            tracing::error!("Failed to fetch created server: {}", e);
-            (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": "Failed to fetch server"})))
-        })?;
 
     tracing::info!("Created server: {} ({}) with agent_id: {:?}", server.name, server.endpoint, agent_id);
     Ok((StatusCode::CREATED, Json(server)))
@@ -124,7 +115,7 @@ pub async fn delete_server(
     State(state): State<Arc<AppState>>,
     Path(id): Path<i64>,
 ) -> Result<StatusCode, StatusCode> {
-    let result = sqlx::query("DELETE FROM servers WHERE id = ?")
+    let result = sqlx::query("DELETE FROM servers WHERE id = $1")
         .bind(id)
         .execute(&state.db)
         .await
@@ -148,7 +139,7 @@ pub async fn update_server(
     Json(input): Json<CreateServer>,
 ) -> Result<Json<Server>, StatusCode> {
     let result = sqlx::query(
-        "UPDATE servers SET name = ?, endpoint = ? WHERE id = ?",
+        "UPDATE servers SET name = $1, endpoint = $2 WHERE id = $3",
     )
     .bind(&input.name)
     .bind(&input.endpoint)
@@ -164,7 +155,7 @@ pub async fn update_server(
         return Err(StatusCode::NOT_FOUND);
     }
 
-    let server = sqlx::query_as::<_, Server>("SELECT * FROM servers WHERE id = ?")
+    let server = sqlx::query_as::<_, Server>(&format!("SELECT {} FROM servers WHERE id = $1", crate::db::SELECT_SERVERS))
         .bind(id)
         .fetch_one(&state.db)
         .await
@@ -183,7 +174,7 @@ pub async fn get_server_containers(
     Path(id): Path<i64>,
 ) -> Result<Json<Vec<Container>>, StatusCode> {
     // Verify server exists
-    let _server = sqlx::query_as::<_, Server>("SELECT * FROM servers WHERE id = ?")
+    let _server = sqlx::query_as::<_, Server>(&format!("SELECT {} FROM servers WHERE id = $1", crate::db::SELECT_SERVERS))
         .bind(id)
         .fetch_optional(&state.db)
         .await
@@ -191,7 +182,7 @@ pub async fn get_server_containers(
         .ok_or(StatusCode::NOT_FOUND)?;
 
     let containers = sqlx::query_as::<_, Container>(
-        "SELECT * FROM containers WHERE server_id = ? ORDER BY name",
+        &format!("SELECT {} FROM containers WHERE server_id = $1 ORDER BY name", crate::db::SELECT_CONTAINERS),
     )
     .bind(id)
     .fetch_all(&state.db)
@@ -210,7 +201,7 @@ pub async fn sync_server(
     Path(id): Path<i64>,
 ) -> Result<Json<Vec<Container>>, StatusCode> {
     // Get server details
-    let server = sqlx::query_as::<_, Server>("SELECT * FROM servers WHERE id = ?")
+    let server = sqlx::query_as::<_, Server>(&format!("SELECT {} FROM servers WHERE id = $1", crate::db::SELECT_SERVERS))
         .bind(id)
         .fetch_optional(&state.db)
         .await
@@ -250,35 +241,69 @@ pub async fn sync_server(
         StatusCode::BAD_GATEWAY
     })?;
 
-    // Update database with fetched containers
-    // First, remove old containers for this server
-    sqlx::query("DELETE FROM containers WHERE server_id = ?")
-        .bind(id)
-        .execute(&state.db)
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    // Upsert containers (preserve existing IDs to keep update_jobs/update_checks)
+    let agent_container_ids: Vec<&str> = agent_containers.iter().map(|c| c.id.as_str()).collect();
 
-    // Insert new containers
     for c in &agent_containers {
-        sqlx::query(
-            "INSERT INTO containers (server_id, container_id, name, image, image_digest, status) VALUES (?, ?, ?, ?, ?, ?)",
+        // Try to update existing container first
+        let updated = sqlx::query(
+            "UPDATE containers SET name = $1, image = $2, image_digest = $3, status = $4 WHERE server_id = $5 AND container_id = $6",
         )
-        .bind(id)
-        .bind(&c.id)
         .bind(&c.name)
         .bind(&c.image)
-        .bind(&c.image_digest)
+        .bind(c.image_digest.as_deref().unwrap_or(""))
         .bind(&c.status)
+        .bind(id)
+        .bind(&c.id)
         .execute(&state.db)
         .await
         .map_err(|e| {
-            tracing::error!("Failed to insert container: {}", e);
+            tracing::error!("Failed to update container: {}", e);
             StatusCode::INTERNAL_SERVER_ERROR
         })?;
+
+        if updated.rows_affected() == 0 {
+            // Container doesn't exist yet, insert it
+            sqlx::query(
+                "INSERT INTO containers (server_id, container_id, name, image, image_digest, status) VALUES ($1, $2, $3, $4, $5, $6)",
+            )
+            .bind(id)
+            .bind(&c.id)
+            .bind(&c.name)
+            .bind(&c.image)
+            .bind(c.image_digest.as_deref().unwrap_or(""))
+            .bind(&c.status)
+            .execute(&state.db)
+            .await
+            .map_err(|e| {
+                tracing::error!("Failed to insert container: {}", e);
+                StatusCode::INTERNAL_SERVER_ERROR
+            })?;
+        }
+    }
+
+    // Remove containers that no longer exist on the agent
+    let existing: Vec<(String,)> = sqlx::query_as(
+        "SELECT container_id FROM containers WHERE server_id = $1",
+    )
+    .bind(id)
+    .fetch_all(&state.db)
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    for (cid,) in &existing {
+        if !agent_container_ids.contains(&cid.as_str()) {
+            sqlx::query("DELETE FROM containers WHERE server_id = $1 AND container_id = $2")
+                .bind(id)
+                .bind(cid)
+                .execute(&state.db)
+                .await
+                .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        }
     }
 
     // Update server last_seen
-    sqlx::query("UPDATE servers SET last_seen = CURRENT_TIMESTAMP WHERE id = ?")
+    sqlx::query("UPDATE servers SET last_seen = CURRENT_TIMESTAMP WHERE id = $1")
         .bind(id)
         .execute(&state.db)
         .await
@@ -293,7 +318,7 @@ pub async fn check_server_health(
     State(state): State<Arc<AppState>>,
     Path(id): Path<i64>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
-    let server = sqlx::query_as::<_, Server>("SELECT * FROM servers WHERE id = ?")
+    let server = sqlx::query_as::<_, Server>(&format!("SELECT {} FROM servers WHERE id = $1", crate::db::SELECT_SERVERS))
         .bind(id)
         .fetch_optional(&state.db)
         .await

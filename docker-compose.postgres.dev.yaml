@@ -1,4 +1,20 @@
 services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: domaj-postgres
+    environment:
+      POSTGRES_DB: domaj
+      POSTGRES_USER: domaj
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-domaj-secret}
+    volumes:
+      - domaj-pgdata:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U domaj" ]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
   server:
     build:
       context: ./domaj-server
@@ -6,13 +22,16 @@ services:
     container_name: domaj-server
     ports:
       - "${SERVER_PORT:-3000}:3000"
-    volumes:
-      - domaj-data:/data
+    depends_on:
+      postgres:
+        condition: service_healthy
     restart: unless-stopped
     extra_hosts:
       - "host.docker.internal:host-gateway"
     env_file:
       - domaj-server.env
+    environment:
+      DATABASE_URL: postgres://domaj:${POSTGRES_PASSWORD:-domaj-secret}@postgres:5432/domaj
 
   web:
     build:
@@ -41,5 +60,5 @@ services:
       - domaj-agent.env
 
 volumes:
-  domaj-data:
+  domaj-pgdata:
     driver: local

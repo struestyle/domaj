@@ -95,6 +95,9 @@
         } else if (sortColumn === "update_type") {
             aVal = a.same_tag_update ? "patch" : "new";
             bVal = b.same_tag_update ? "patch" : "new";
+        } else if (sortColumn === "versions_behind") {
+            aVal = a.versions_behind;
+            bVal = b.versions_behind;
         } else {
             aVal = a[sortColumn] || "";
             bVal = b[sortColumn] || "";
@@ -388,6 +391,16 @@
                                             : "↓"
                                         : ""}
                                 </th>
+                                <th
+                                    class="sortable"
+                                    on:click={() => sortBy("versions_behind")}
+                                >
+                                    Retard {sortColumn === "versions_behind"
+                                        ? sortDirection === "asc"
+                                            ? "↑"
+                                            : "↓"
+                                        : ""}
+                                </th>
                                 <th>Tag disponible</th>
                                 <th>Actions</th>
                             </tr>
@@ -499,6 +512,17 @@
                                                 </svg>
                                                 Nouveau
                                             </span>
+                                        {/if}
+                                    </td>
+                                    <td>
+                                        {#if update.versions_behind < 0}
+                                            <span class="badge badge-muted">N/A</span>
+                                        {:else if update.versions_behind === 0}
+                                            <span class="badge badge-success">À jour</span>
+                                        {:else if update.versions_behind <= 3}
+                                            <span class="badge badge-warning">{update.versions_behind}</span>
+                                        {:else}
+                                            <span class="badge badge-danger">{update.versions_behind}</span>
                                         {/if}
                                     </td>
                                     <td>

@@ -24,7 +24,7 @@ pub async fn list_containers(
 ) -> Result<Json<Vec<ContainerWithServer>>, StatusCode> {
     // Get all containers
     let containers: Vec<Container> = sqlx::query_as(
-        "SELECT * FROM containers ORDER BY server_id, name",
+        &format!("SELECT {} FROM containers ORDER BY server_id, name", crate::db::SELECT_CONTAINERS),
     )
     .fetch_all(&state.db)
     .await
@@ -34,7 +34,7 @@ pub async fn list_containers(
     })?;
 
     // Get all servers for mapping
-    let servers: Vec<crate::db::Server> = sqlx::query_as("SELECT * FROM servers")
+    let servers: Vec<crate::db::Server> = sqlx::query_as(&format!("SELECT {} FROM servers", crate::db::SELECT_SERVERS))
         .fetch_all(&state.db)
         .await
         .unwrap_or_default();
@@ -63,7 +63,7 @@ pub async fn get_container(
     State(state): State<Arc<AppState>>,
     Path(id): Path<i64>,
 ) -> Result<Json<ContainerWithServer>, StatusCode> {
-    let container: Container = sqlx::query_as("SELECT * FROM containers WHERE id = ?")
+    let container: Container = sqlx::query_as(&format!("SELECT {} FROM containers WHERE id = $1", crate::db::SELECT_CONTAINERS))
         .bind(id)
         .fetch_optional(&state.db)
         .await
@@ -73,7 +73,7 @@ pub async fn get_container(
         })?
         .ok_or(StatusCode::NOT_FOUND)?;
 
-    let server: crate::db::Server = sqlx::query_as("SELECT * FROM servers WHERE id = ?")
+    let server: crate::db::Server = sqlx::query_as(&format!("SELECT {} FROM servers WHERE id = $1", crate::db::SELECT_SERVERS))
         .bind(container.server_id)
         .fetch_optional(&state.db)
         .await
@@ -93,7 +93,7 @@ pub async fn get_container_updates(
     Path(id): Path<i64>,
 ) -> Result<Json<Vec<UpdateCheck>>, StatusCode> {
     let updates: Vec<UpdateCheck> = sqlx::query_as(
-        "SELECT * FROM update_checks WHERE container_id = ? ORDER BY checked_at DESC LIMIT 10",
+        &format!("SELECT {} FROM update_checks WHERE container_id = $1 ORDER BY checked_at DESC LIMIT 10", crate::db::SELECT_UPDATE_CHECKS),
     )
     .bind(id)
     .fetch_all(&state.db)
@@ -111,13 +111,13 @@ pub async fn list_updates(
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<Vec<UpdateSummary>>, StatusCode> {
     // Get all containers
-    let containers: Vec<Container> = sqlx::query_as("SELECT * FROM containers")
+    let containers: Vec<Container> = sqlx::query_as(&format!("SELECT {} FROM containers", crate::db::SELECT_CONTAINERS))
         .fetch_all(&state.db)
         .await
         .unwrap_or_default();
 
     // Get all servers
-    let servers: Vec<crate::db::Server> = sqlx::query_as("SELECT * FROM servers")
+    let servers: Vec<crate::db::Server> = sqlx::query_as(&format!("SELECT {} FROM servers", crate::db::SELECT_SERVERS))
         .fetch_all(&state.db)
         .await
         .unwrap_or_default();
@@ -128,7 +128,7 @@ pub async fn list_updates(
         .collect();
 
     // Get all update checks
-    let checks: Vec<UpdateCheck> = sqlx::query_as("SELECT * FROM update_checks")
+    let checks: Vec<UpdateCheck> = sqlx::query_as(&format!("SELECT {} FROM update_checks", crate::db::SELECT_UPDATE_CHECKS))
         .fetch_all(&state.db)
         .await
         .unwrap_or_default();
@@ -144,23 +144,31 @@ pub async fn list_updates(
 
         let same_tag_check = container_checks
             .iter()
-            .find(|c| c.check_type == "same_tag" && c.has_update);
+            .find(|c| c.check_type == "same_tag" && c.has_update != 0);
 
         let same_tag_update = same_tag_check.is_some();
-        let same_tag_digest = same_tag_check.and_then(|c| c.remote_digest.clone());
+        let same_tag_digest = same_tag_check.map(|c| c.remote_digest.clone()).unwrap_or_default();
 
         let latest_check = container_checks
             .iter()
-            .find(|c| c.check_type == "latest" && c.has_update);
+            .find(|c| c.check_type == "latest" && c.has_update != 0);
 
         let latest_update = latest_check.is_some();
-        let latest_tag = latest_check.and_then(|c| c.latest_tag.clone());
-        let latest_digest = latest_check.and_then(|c| c.remote_digest.clone());
+        let latest_tag = latest_check.map(|c| c.latest_tag.clone()).unwrap_or_default();
+        let latest_digest = latest_check.map(|c| c.remote_digest.clone()).unwrap_or_default();
 
         let last_checked = container_checks
             .iter()
-            .map(|c| c.checked_at)
-            .max();
+            .map(|c| c.checked_at.clone())
+            .max()
+            .unwrap_or_default();
+
+        // Get version gap from any check for this container (same value for both check types)
+        let versions_behind = container_checks
+            .iter()
+            .map(|c| c.version_gap)
+            .max()
+            .unwrap_or(-1);
 
         if same_tag_update || latest_update {
             updates.push(UpdateSummary {
@@ -174,6 +182,7 @@ pub async fn list_updates(
                 latest_update,
                 latest_tag,
                 latest_digest,
+                versions_behind,
                 last_checked,
             });
         }
@@ -214,7 +223,7 @@ pub async fn update_container(
     Json(body): Json<UpdateContainerRequest>,
 ) -> Result<(StatusCode, Json<serde_json::Value>), (StatusCode, Json<serde_json::Value>)> {
     // Get container info
-    let container: Container = sqlx::query_as("SELECT * FROM containers WHERE id = ?")
+    let container: Container = sqlx::query_as(&format!("SELECT {} FROM containers WHERE id = $1", crate::db::SELECT_CONTAINERS))
         .bind(id)
         .fetch_optional(&state.db)
         .await
@@ -225,7 +234,7 @@ pub async fn update_container(
         .ok_or_else(|| (StatusCode::NOT_FOUND, Json(serde_json::json!({"error": "Container not found"}))))?;
 
     // Get the server this container belongs to
-    let server: crate::db::Server = sqlx::query_as("SELECT * FROM servers WHERE id = ?")
+    let server: crate::db::Server = sqlx::query_as(&format!("SELECT {} FROM servers WHERE id = $1", crate::db::SELECT_SERVERS))
         .bind(container.server_id)
         .fetch_optional(&state.db)
         .await
@@ -241,7 +250,7 @@ pub async fn update_container(
 
     // Create job in database (store current image as previous_image for rollback)
     let job_id: i64 = sqlx::query_scalar(
-        "INSERT INTO update_jobs (container_id, container_name, server_name, image, target_tag, previous_image, job_type, status) VALUES (?, ?, ?, ?, ?, ?, 'update', 'running') RETURNING id"
+        "INSERT INTO update_jobs (container_id, container_name, server_name, image, target_tag, previous_image, job_type, status) VALUES ($1, $2, $3, $4, $5, $6, 'update', 'running') RETURNING id"
     )
     .bind(container.id)
     .bind(&container.name)
@@ -299,7 +308,7 @@ pub async fn update_container(
                 tracing::info!("✅ Container {} updated successfully", container_name);
                 // Mark job as success
                 let _ = sqlx::query(
-                    "UPDATE update_jobs SET status = 'success', completed_at = CURRENT_TIMESTAMP WHERE id = ?"
+                    "UPDATE update_jobs SET status = 'success', completed_at = CURRENT_TIMESTAMP WHERE id = $1"
                 )
                 .bind(job_id)
                 .execute(&state_clone.db)
@@ -307,7 +316,7 @@ pub async fn update_container(
 
                 // Clear update_checks so the container disappears from the updates list
                 let _ = sqlx::query(
-                    "DELETE FROM update_checks WHERE container_id = ?"
+                    "DELETE FROM update_checks WHERE container_id = $1"
                 )
                 .bind(container_id)
                 .execute(&state_clone.db)
@@ -332,7 +341,7 @@ pub async fn update_container(
                 tracing::error!("Agent returned error for {}: {} - {}", container_name, status, error_msg);
 
                 let _ = sqlx::query(
-                    "UPDATE update_jobs SET status = 'failed', error_message = ?, completed_at = CURRENT_TIMESTAMP WHERE id = ?"
+                    "UPDATE update_jobs SET status = 'failed', error_message = $1, completed_at = CURRENT_TIMESTAMP WHERE id = $2"
                 )
                 .bind(&error_msg)
                 .bind(job_id)
@@ -354,7 +363,7 @@ pub async fn update_container(
                 tracing::error!("{}", error_msg);
 
                 let _ = sqlx::query(
-                    "UPDATE update_jobs SET status = 'failed', error_message = ?, completed_at = CURRENT_TIMESTAMP WHERE id = ?"
+                    "UPDATE update_jobs SET status = 'failed', error_message = $1, completed_at = CURRENT_TIMESTAMP WHERE id = $2"
                 )
                 .bind(&error_msg)
                 .bind(job_id)
@@ -386,7 +395,7 @@ pub async fn list_update_jobs(
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<Vec<crate::db::UpdateJob>>, StatusCode> {
     let jobs: Vec<crate::db::UpdateJob> = sqlx::query_as(
-        "SELECT * FROM update_jobs ORDER BY started_at DESC LIMIT 50"
+        &format!("SELECT {} FROM update_jobs ORDER BY started_at DESC LIMIT 50", crate::db::SELECT_UPDATE_JOBS)
     )
     .fetch_all(&state.db)
     .await
@@ -405,7 +414,7 @@ pub async fn rollback_job(
 ) -> Result<(StatusCode, Json<serde_json::Value>), (StatusCode, Json<serde_json::Value>)> {
     // Get the original job
     let original_job: crate::db::UpdateJob = sqlx::query_as(
-        "SELECT * FROM update_jobs WHERE id = ?"
+        &format!("SELECT {} FROM update_jobs WHERE id = $1", crate::db::SELECT_UPDATE_JOBS)
     )
     .bind(job_id)
     .fetch_optional(&state.db)
@@ -413,13 +422,14 @@ pub async fn rollback_job(
     .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": "Database error"}))))?
     .ok_or_else(|| (StatusCode::NOT_FOUND, Json(serde_json::json!({"error": "Job non trouvé"}))))?;
 
-    let previous_image = original_job.previous_image.ok_or_else(|| {
-        (StatusCode::BAD_REQUEST, Json(serde_json::json!({"error": "Pas d'image précédente enregistrée pour ce job"})))
-    })?;
+    let previous_image = original_job.previous_image.clone();
+    if previous_image.is_empty() {
+        return Err((StatusCode::BAD_REQUEST, Json(serde_json::json!({"error": "Pas d'image précédente enregistrée pour ce job"}))));
+    }
 
     // Get the server for this container
     let server: crate::db::Server = sqlx::query_as(
-        "SELECT s.* FROM servers s JOIN containers c ON c.server_id = s.id WHERE c.id = ?"
+        &format!("SELECT s.id, s.name, s.endpoint, s.api_key, COALESCE(s.agent_id, '') AS agent_id, COALESCE(s.last_seen, '') AS last_seen, s.created_at FROM servers s JOIN containers c ON c.server_id = s.id WHERE c.id = $1")
     )
     .bind(original_job.container_id)
     .fetch_optional(&state.db)
@@ -436,7 +446,7 @@ pub async fn rollback_job(
 
     // Create rollback job
     let rollback_job_id: i64 = sqlx::query_scalar(
-        "INSERT INTO update_jobs (container_id, container_name, server_name, image, previous_image, job_type, status) VALUES (?, ?, ?, ?, ?, 'rollback', 'running') RETURNING id"
+        "INSERT INTO update_jobs (container_id, container_name, server_name, image, previous_image, job_type, status) VALUES ($1, $2, $3, $4, $5, 'rollback', 'running') RETURNING id"
     )
     .bind(original_job.container_id)
     .bind(&original_job.container_name)
@@ -492,7 +502,7 @@ pub async fn rollback_job(
             Ok(response) if response.status().is_success() => {
                 tracing::info!("✅ Rollback of {} completed successfully", container_name);
                 let _ = sqlx::query(
-                    "UPDATE update_jobs SET status = 'success', completed_at = CURRENT_TIMESTAMP WHERE id = ?"
+                    "UPDATE update_jobs SET status = 'success', completed_at = CURRENT_TIMESTAMP WHERE id = $1"
                 )
                 .bind(rollback_job_id)
                 .execute(&state_clone.db)
@@ -516,7 +526,7 @@ pub async fn rollback_job(
                 tracing::error!("Rollback failed for {}: {}", container_name, error_msg);
 
                 let _ = sqlx::query(
-                    "UPDATE update_jobs SET status = 'failed', error_message = ?, completed_at = CURRENT_TIMESTAMP WHERE id = ?"
+                    "UPDATE update_jobs SET status = 'failed', error_message = $1, completed_at = CURRENT_TIMESTAMP WHERE id = $2"
                 )
                 .bind(&error_msg)
                 .bind(rollback_job_id)
@@ -538,7 +548,7 @@ pub async fn rollback_job(
                 tracing::error!("{}", error_msg);
 
                 let _ = sqlx::query(
-                    "UPDATE update_jobs SET status = 'failed', error_message = ?, completed_at = CURRENT_TIMESTAMP WHERE id = ?"
+                    "UPDATE update_jobs SET status = 'failed', error_message = $1, completed_at = CURRENT_TIMESTAMP WHERE id = $2"
                 )
                 .bind(&error_msg)
                 .bind(rollback_job_id)

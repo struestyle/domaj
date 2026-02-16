@@ -141,7 +141,7 @@ fn generate_html_report(updates: &[UpdateSummary]) -> String {
             html.push_str(r#"<span class="badge badge-same">🔄 Même tag mis à jour</span>"#);
         }
         if update.latest_update {
-            let tag = update.latest_tag.as_deref().unwrap_or("latest");
+            let tag = if update.latest_tag.is_empty() { "latest" } else { &update.latest_tag };
             html.push_str(&format!(
                 r#"<span class="badge badge-latest">🆕 {} disponible</span>"#,
                 tag
@@ -182,7 +182,7 @@ fn generate_text_report(updates: &[UpdateSummary]) -> String {
             text.push_str("   🔄 Même tag mis à jour sur le registre\n");
         }
         if update.latest_update {
-            let tag = update.latest_tag.as_deref().unwrap_or("latest");
+            let tag = if update.latest_tag.is_empty() { "latest" } else { &update.latest_tag };
             text.push_str(&format!("   🆕 Tag '{}' disponible\n", tag));
         }
         text.push_str("\n");

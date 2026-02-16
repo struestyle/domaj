@@ -35,12 +35,12 @@ pub async fn send_update_report(state: &AppState) -> Result<()> {
 /// Get all containers with pending updates
 pub async fn get_pending_updates(state: &AppState) -> Result<Vec<UpdateSummary>> {
     // Get all containers
-    let containers: Vec<Container> = sqlx::query_as("SELECT * FROM containers")
+    let containers: Vec<Container> = sqlx::query_as(&format!("SELECT {} FROM containers", crate::db::SELECT_CONTAINERS))
         .fetch_all(&state.db)
         .await?;
 
     // Get all servers
-    let servers: Vec<Server> = sqlx::query_as("SELECT * FROM servers")
+    let servers: Vec<Server> = sqlx::query_as(&format!("SELECT {} FROM servers", crate::db::SELECT_SERVERS))
         .fetch_all(&state.db)
         .await?;
 
@@ -50,7 +50,7 @@ pub async fn get_pending_updates(state: &AppState) -> Result<Vec<UpdateSummary>>
         .collect();
 
     // Get all update checks
-    let checks: Vec<UpdateCheck> = sqlx::query_as("SELECT * FROM update_checks")
+    let checks: Vec<UpdateCheck> = sqlx::query_as(&format!("SELECT {} FROM update_checks", crate::db::SELECT_UPDATE_CHECKS))
         .fetch_all(&state.db)
         .await?;
 
@@ -65,23 +65,30 @@ pub async fn get_pending_updates(state: &AppState) -> Result<Vec<UpdateSummary>>
 
         let same_tag_check = container_checks
             .iter()
-            .find(|c| c.check_type == "same_tag" && c.has_update);
+            .find(|c| c.check_type == "same_tag" && c.has_update != 0);
 
         let same_tag_update = same_tag_check.is_some();
-        let same_tag_digest = same_tag_check.and_then(|c| c.remote_digest.clone());
+        let same_tag_digest = same_tag_check.map(|c| c.remote_digest.clone()).unwrap_or_default();
 
         let latest_check = container_checks
             .iter()
-            .find(|c| c.check_type == "latest" && c.has_update);
+            .find(|c| c.check_type == "latest" && c.has_update != 0);
 
         let latest_update = latest_check.is_some();
-        let latest_tag = latest_check.and_then(|c| c.latest_tag.clone());
-        let latest_digest = latest_check.and_then(|c| c.remote_digest.clone());
+        let latest_tag = latest_check.map(|c| c.latest_tag.clone()).unwrap_or_default();
+        let latest_digest = latest_check.map(|c| c.remote_digest.clone()).unwrap_or_default();
 
         let last_checked = container_checks
             .iter()
-            .map(|c| c.checked_at)
-            .max();
+            .map(|c| c.checked_at.clone())
+            .max()
+            .unwrap_or_default();
+
+        let versions_behind = container_checks
+            .iter()
+            .map(|c| c.version_gap)
+            .max()
+            .unwrap_or(-1);
 
         if same_tag_update || latest_update {
             updates.push(UpdateSummary {
@@ -95,6 +102,7 @@ pub async fn get_pending_updates(state: &AppState) -> Result<Vec<UpdateSummary>>
                 latest_update,
                 latest_tag,
                 latest_digest,
+                versions_behind,
                 last_checked,
             });
         }

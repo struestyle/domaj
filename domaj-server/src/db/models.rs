@@ -1,6 +1,5 @@
 //! Database models for Domaj Server
 
-use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
 
@@ -12,7 +11,7 @@ pub struct User {
     #[serde(skip_serializing)]
     pub password_hash: String,
     pub role: String,
-    pub created_at: DateTime<Utc>,
+    pub created_at: String,
 }
 
 /// User response without password hash
@@ -21,7 +20,7 @@ pub struct UserResponse {
     pub id: i64,
     pub username: String,
     pub role: String,
-    pub created_at: DateTime<Utc>,
+    pub created_at: String,
 }
 
 impl From<User> for UserResponse {
@@ -42,9 +41,9 @@ pub struct Server {
     pub name: String,
     pub endpoint: String,
     pub api_key: String,
-    pub agent_id: Option<String>,
-    pub last_seen: Option<DateTime<Utc>>,
-    pub created_at: DateTime<Utc>,
+    pub agent_id: String,
+    pub last_seen: String,
+    pub created_at: String,
 }
 
 /// Input for creating a new server
@@ -62,11 +61,11 @@ pub struct Container {
     pub container_id: String,
     pub name: String,
     pub image: String,
-    pub image_digest: Option<String>,
-    pub architecture: Option<String>,
+    pub image_digest: String,
+    pub architecture: String,
     pub status: String,
-    pub created_at: DateTime<Utc>,
-    pub last_checked: Option<DateTime<Utc>>,
+    pub created_at: String,
+    pub last_checked: String,
 }
 
 /// Container with server information for API responses
@@ -84,10 +83,11 @@ pub struct UpdateCheck {
     pub container_id: i64,
     pub check_type: String,
     pub local_digest: String,
-    pub remote_digest: Option<String>,
-    pub has_update: bool,
-    pub latest_tag: Option<String>,
-    pub checked_at: DateTime<Utc>,
+    pub remote_digest: String,
+    pub has_update: i32,
+    pub latest_tag: String,
+    pub version_gap: i32,
+    pub checked_at: String,
 }
 
 /// Type of update check
@@ -127,14 +127,15 @@ pub struct UpdateSummary {
     pub container_id: i64,
     pub container_name: String,
     pub image: String,
-    pub image_digest: Option<String>,
+    pub image_digest: String,
     pub server_name: String,
     pub same_tag_update: bool,
-    pub same_tag_digest: Option<String>,
+    pub same_tag_digest: String,
     pub latest_update: bool,
-    pub latest_tag: Option<String>,
-    pub latest_digest: Option<String>,
-    pub last_checked: Option<DateTime<Utc>>,
+    pub latest_tag: String,
+    pub latest_digest: String,
+    pub versions_behind: i32,
+    pub last_checked: String,
 }
 
 /// Criticality level for updates
@@ -159,13 +160,13 @@ pub struct UpdateJob {
     pub container_name: String,
     pub server_name: String,
     pub image: String,
-    pub target_tag: Option<String>,
+    pub target_tag: String,
     pub status: String,
-    pub error_message: Option<String>,
-    pub previous_image: Option<String>,
+    pub error_message: String,
+    pub previous_image: String,
     pub job_type: String,
-    pub started_at: DateTime<Utc>,
-    pub completed_at: Option<DateTime<Utc>>,
+    pub started_at: String,
+    pub completed_at: String,
 }
 
 /// Registry credential stored in the database (managed via UI)
@@ -176,6 +177,5 @@ pub struct DbRegistryCredential {
     pub username: String,
     #[serde(skip_serializing)]
     pub password: String,
-    pub created_at: DateTime<Utc>,
+    pub created_at: String,
 }
-

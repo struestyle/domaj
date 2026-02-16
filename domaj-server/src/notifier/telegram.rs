@@ -66,7 +66,7 @@ fn generate_telegram_message(updates: &[UpdateSummary]) -> String {
             msg.push_str("  🔄 Même tag mis à jour\n");
         }
         if update.latest_update {
-            let tag = update.latest_tag.as_deref().unwrap_or("latest");
+            let tag = if update.latest_tag.is_empty() { "latest" } else { &update.latest_tag };
             msg.push_str(&format!(
                 "  🆕 Tag `{}` disponible\n",
                 escape_markdown(tag)

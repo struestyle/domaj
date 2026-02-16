@@ -209,6 +209,11 @@ a:hover {
   color: var(--color-primary);
 }
 
+.badge-muted {
+  background: rgba(113, 113, 122, 0.2);
+  color: var(--text-muted);
+}
+
 /* Tables */
 .table {
   width: 100%;

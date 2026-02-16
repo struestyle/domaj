@@ -80,7 +80,7 @@ pub async fn register(
         .to_string();
 
     // Check if username exists
-    let existing: Option<(i64,)> = sqlx::query_as("SELECT id FROM users WHERE username = ?")
+    let existing: Option<(i64,)> = sqlx::query_as("SELECT id FROM users WHERE username = $1")
         .bind(&req.username)
         .fetch_optional(&state.db)
         .await
@@ -91,17 +91,15 @@ pub async fn register(
     }
 
     // Insert user
-    let result = sqlx::query(
-        "INSERT INTO users (username, password_hash, role) VALUES (?, ?, ?)"
+    let (user_id,): (i64,) = sqlx::query_as(
+        "INSERT INTO users (username, password_hash, role) VALUES ($1, $2, $3) RETURNING id"
     )
     .bind(&req.username)
     .bind(&password_hash)
     .bind(role)
-    .execute(&state.db)
+    .fetch_one(&state.db)
     .await
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-
-    let user_id = result.last_insert_rowid();
 
     // Create JWT
     let token = create_jwt(user_id, &req.username, role, &state.config.jwt_secret)
@@ -111,7 +109,7 @@ pub async fn register(
         id: user_id,
         username: req.username,
         role: role.to_string(),
-        created_at: chrono::Utc::now(),
+        created_at: chrono::Utc::now().to_rfc3339(),
     };
 
     Ok(Json(AuthResponse { token, user }))
@@ -123,7 +121,7 @@ pub async fn login(
     Json(req): Json<LoginRequest>,
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
     // Find user
-    let user: User = sqlx::query_as("SELECT * FROM users WHERE username = ?")
+    let user: User = sqlx::query_as(&format!("SELECT {} FROM users WHERE username = $1", crate::db::SELECT_USERS))
         .bind(&req.username)
         .fetch_optional(&state.db)
         .await
@@ -153,7 +151,7 @@ pub async fn me(
     State(state): State<Arc<AppState>>,
     claims: Claims,
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
-    let user: User = sqlx::query_as("SELECT * FROM users WHERE id = ?")
+    let user: User = sqlx::query_as(&format!("SELECT {} FROM users WHERE id = $1", crate::db::SELECT_USERS))
         .bind(claims.sub)
         .fetch_optional(&state.db)
         .await

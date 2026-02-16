@@ -12,7 +12,7 @@ mod scheduler;
 
 use std::sync::Arc;
 use axum::Router;
-use sqlx::SqlitePool;
+use sqlx::AnyPool;
 use tokio::sync::{broadcast, RwLock};
 use tower_http::cors::{Any, CorsLayer};
 use tower_http::trace::TraceLayer;
@@ -23,7 +23,7 @@ use crate::scheduler::Scheduler;
 
 /// Application state shared across all handlers
 pub struct AppState {
-    pub db: SqlitePool,
+    pub db: AnyPool,
     pub config: Config,
     pub scheduler: Arc<RwLock<Scheduler>>,
     pub broadcast_tx: broadcast::Sender<String>,
@@ -52,7 +52,8 @@ async fn main() -> anyhow::Result<()> {
 
     // Initialize database
     let db = db::init_db(&config.database_url).await?;
-    tracing::info!("💾 Database initialized");
+    let db_type = if config.database_url.starts_with("postgres") { "PostgreSQL" } else { "SQLite" };
+    tracing::info!("💾 Database initialized ({})", db_type);
 
     // Setup admin account from environment variables if configured
     setup_admin_account(&db, &config).await?;
@@ -100,7 +101,7 @@ async fn main() -> anyhow::Result<()> {
 }
 
 /// Setup admin account from environment variables if configured
-async fn setup_admin_account(db: &sqlx::SqlitePool, config: &Config) -> anyhow::Result<()> {
+async fn setup_admin_account(db: &AnyPool, config: &Config) -> anyhow::Result<()> {
     use argon2::{
         password_hash::{rand_core::OsRng, PasswordHasher, SaltString},
         Argon2,
@@ -123,7 +124,7 @@ async fn setup_admin_account(db: &sqlx::SqlitePool, config: &Config) -> anyhow::
     }
 
     // Check if admin user already exists
-    let existing: Option<(i64,)> = sqlx::query_as("SELECT id FROM users WHERE username = ?")
+    let existing: Option<(i64,)> = sqlx::query_as("SELECT id FROM users WHERE username = $1")
         .bind(username)
         .fetch_optional(db)
         .await?;
@@ -143,7 +144,7 @@ async fn setup_admin_account(db: &sqlx::SqlitePool, config: &Config) -> anyhow::
 
     // Create admin user
     sqlx::query(
-        "INSERT INTO users (username, password_hash, role) VALUES (?, ?, 'admin')"
+        "INSERT INTO users (username, password_hash, role) VALUES ($1, $2, 'admin')"
     )
     .bind(username)
     .bind(&password_hash)
