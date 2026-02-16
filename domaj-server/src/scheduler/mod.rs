@@ -7,7 +7,7 @@ use anyhow::Result;
 use tokio_cron_scheduler::{Job, JobScheduler};
 
 use crate::db::{CheckType, Container, Server};
-use crate::registry::{get_registry_client, ImageReference};
+use crate::registry::{get_registry_client, ImageReference, RegistryClientDyn};
 use crate::AppState;
 
 /// Scheduler wrapper
@@ -280,6 +280,88 @@ fn count_newer_versions(current_tag: &str, all_tags: &[String]) -> i32 {
     newer_versions.len() as i32
 }
 
+/// Resolve the effective semver tag for a container.
+/// When the container's tag is not semver-parseable (e.g. "latest", "alpine"),
+/// find other tags in the repo that share the same digest and pick the most precise one.
+async fn resolve_effective_tag(
+    client: &dyn RegistryClientDyn,
+    repository: &str,
+    current_tag: &str,
+    local_digest: &str,
+    all_tags: &[String],
+) -> String {
+    // If current tag is already semver-parseable, use it directly
+    if parse_semver(current_tag).is_some() {
+        return current_tag.to_string();
+    }
+
+    // No digest to compare against
+    if local_digest.is_empty() {
+        return current_tag.to_string();
+    }
+
+    tracing::debug!(
+        "🔍 Tag '{}' is not semver, resolving effective tag via digest matching...",
+        current_tag
+    );
+
+    // Fetch digests for semver-parseable tags concurrently to find matches
+    let semver_tags: Vec<&String> = all_tags
+        .iter()
+        .filter(|t| parse_semver(t).is_some())
+        .collect();
+
+    // Limit to avoid too many API calls (take the most recent-looking tags)
+    let check_limit = 50;
+    let tags_to_check: Vec<&&String> = semver_tags.iter().rev().take(check_limit).collect();
+
+    let mut matching_tags: Vec<String> = Vec::new();
+
+    // Check digests concurrently in batches
+    let futures: Vec<_> = tags_to_check
+        .iter()
+        .map(|tag| {
+            let tag_str = tag.to_string();
+            let repo = repository.to_string();
+            async move {
+                match client.get_digest_dyn(&repo, &tag_str).await {
+                    Ok(digest) => Some((tag_str, digest)),
+                    Err(_) => None,
+                }
+            }
+        })
+        .collect();
+
+    let results = futures_util::future::join_all(futures).await;
+
+    for result in results.into_iter().flatten() {
+        let (tag, digest) = result;
+        if digest == local_digest {
+            matching_tags.push(tag);
+        }
+    }
+
+    if matching_tags.is_empty() {
+        tracing::debug!("No semver tags match digest for '{}'", current_tag);
+        return current_tag.to_string();
+    }
+
+    // Pick the most precise tag (highest depth: X.Y.Z > X.Y > X)
+    matching_tags.sort_by(|a, b| {
+        let depth_a = a.split('-').next().unwrap_or(a).split('.').count();
+        let depth_b = b.split('-').next().unwrap_or(b).split('.').count();
+        depth_b.cmp(&depth_a) // Most precise first
+    });
+
+    let effective = matching_tags[0].clone();
+    tracing::info!(
+        "🏷️  Resolved '{}' -> '{}' for version gap calculation",
+        current_tag,
+        effective
+    );
+    effective
+}
+
 /// Check for updates for a single container
 async fn check_container_updates(state: &AppState, container: &Container) -> Result<bool> {
     let image_ref = ImageReference::parse(&container.image);
@@ -306,18 +388,29 @@ async fn check_container_updates(state: &AppState, container: &Container) -> Res
         }
     };
 
-    // Calculate version gap
+    // Resolve effective tag: if current tag isn't semver (e.g. "latest"),
+    // find the most precise semver tag that shares the same digest
+    let effective_tag = resolve_effective_tag(
+        client.as_ref(),
+        &image_ref.repository,
+        &image_ref.tag,
+        &container.image_digest,
+        &all_tags,
+    ).await;
+
+    // Calculate version gap using the effective tag
     let version_gap = if all_tags.is_empty() {
         -1
     } else {
-        count_newer_versions(&image_ref.tag, &all_tags)
+        count_newer_versions(&effective_tag, &all_tags)
     };
 
     if version_gap > 0 {
         tracing::info!(
-            "📊 {} is {} version(s) behind (current: {})",
+            "📊 {} is {} version(s) behind (effective tag: {}, original: {})",
             container.name,
             version_gap,
+            effective_tag,
             image_ref.tag
         );
     }
