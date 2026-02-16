@@ -248,9 +248,20 @@ fn count_newer_versions(current_tag: &str, all_tags: &[String]) -> i32 {
         None => return -1, // Not a semver tag
     };
 
-    // Determine the suffix pattern (e.g., "-alpine") and depth of the current tag
+    // Normalize suffix: hex-only suffixes (commit hashes) are treated as no suffix
+    let normalize_suffix = |s: &str| -> String {
+        let stripped = s.strip_prefix('v').unwrap_or(s);
+        let suffix = stripped.split_once('-').map(|(_, s)| s).unwrap_or("");
+        // If suffix is all hex characters, treat it as build metadata (no family)
+        if !suffix.is_empty() && suffix.chars().all(|c| c.is_ascii_hexdigit()) {
+            String::new()
+        } else {
+            suffix.to_string()
+        }
+    };
+
+    let current_suffix = normalize_suffix(current_tag);
     let stripped = current_tag.strip_prefix('v').unwrap_or(current_tag);
-    let suffix = stripped.split_once('-').map(|(_, s)| s).unwrap_or("");
     let depth = stripped.split('-').next().unwrap_or("").split('.').count();
 
     let mut newer_versions: Vec<(u64, u64, u64)> = Vec::new();
@@ -258,9 +269,9 @@ fn count_newer_versions(current_tag: &str, all_tags: &[String]) -> i32 {
     for tag in all_tags {
         let t = tag.strip_prefix('v').unwrap_or(tag);
         
-        // Check suffix matches
-        let tag_suffix = t.split_once('-').map(|(_, s)| s).unwrap_or("");
-        if tag_suffix != suffix {
+        // Check normalized suffix matches
+        let tag_suffix = normalize_suffix(tag);
+        if tag_suffix != current_suffix {
             continue;
         }
 
@@ -280,13 +291,14 @@ fn count_newer_versions(current_tag: &str, all_tags: &[String]) -> i32 {
     newer_versions.len() as i32
 }
 
-/// Resolve the effective semver tag for a container.
+/// Resolve the effective semver tag for a given digest.
 /// When the container's tag is not semver-parseable (e.g. "latest", "alpine"),
 /// find other tags in the repo that share the same digest and pick the most precise one.
 async fn resolve_effective_tag(
     client: &dyn RegistryClientDyn,
     repository: &str,
     current_tag: &str,
+    digest: &str,
     all_tags: &[String],
 ) -> String {
     // If current tag is already semver-parseable, use it directly
@@ -294,25 +306,9 @@ async fn resolve_effective_tag(
         return current_tag.to_string();
     }
 
-    tracing::debug!(
-        "🔍 Tag '{}' is not semver, resolving effective tag via digest matching...",
-        current_tag
-    );
-
-    // Get the REMOTE digest for the current tag (not the local one, which may be outdated)
-    let current_remote_digest = match client.get_digest_dyn(repository, current_tag).await {
-        Ok(digest) => digest,
-        Err(e) => {
-            tracing::debug!("Cannot resolve '{}': failed to get remote digest: {}", current_tag, e);
-            return current_tag.to_string();
-        }
-    };
-
-    tracing::debug!(
-        "Remote digest for '{}': {}",
-        current_tag,
-        &current_remote_digest[..20.min(current_remote_digest.len())]
-    );
+    if digest.is_empty() {
+        return current_tag.to_string();
+    }
 
     // Determine the suffix pattern to match.
     // For "alpine" -> look for tags ending with "-alpine" (like "7.4.2-alpine")
@@ -332,7 +328,21 @@ async fn resolve_effective_tag(
             }
             match &suffix_pattern {
                 Some(suffix) => t.ends_with(suffix),
-                None => !t.contains('-'), // no suffix for "latest" resolution
+                None => {
+                    // For "latest" resolution: include tags without suffix,
+                    // AND tags with build-metadata suffixes (hex commit hashes like "2026.2.14-39ac4d438")
+                    // Exclude variant suffixes like "-alpine", "-slim", "-bullseye"
+                    if !t.contains('-') {
+                        return true; // no suffix at all
+                    }
+                    // Check if the suffix after the version part is a build identifier (all hex)
+                    let stripped = t.strip_prefix('v').unwrap_or(t);
+                    if let Some((_, suffix)) = stripped.split_once('-') {
+                        suffix.chars().all(|c| c.is_ascii_hexdigit())
+                    } else {
+                        true
+                    }
+                }
             }
         })
         .collect();
@@ -350,12 +360,11 @@ async fn resolve_effective_tag(
 
     let mut matching_tags: Vec<String> = Vec::new();
 
-    tracing::info!(
-        "🔍 Resolving '{}': checking {} candidate tags (out of {} semver) against digest {}...",
+    tracing::debug!(
+        "🔍 Resolving '{}': checking {} candidate tags against digest {}...",
         current_tag,
         tags_to_check.len(),
-        semver_tags.len(),
-        &current_remote_digest[..20.min(current_remote_digest.len())]
+        &digest[..20.min(digest.len())]
     );
 
     // Check digests concurrently
@@ -376,14 +385,13 @@ async fn resolve_effective_tag(
     let results = futures_util::future::join_all(futures).await;
 
     for result in results.into_iter().flatten() {
-        let (tag, digest) = result;
-        if digest == current_remote_digest {
+        let (tag, tag_digest) = result;
+        if tag_digest == digest {
             matching_tags.push(tag);
         }
     }
 
     if matching_tags.is_empty() {
-        tracing::info!("⚠️ No semver tags match remote digest for '{}'", current_tag);
         return current_tag.to_string();
     }
 
@@ -395,11 +403,6 @@ async fn resolve_effective_tag(
     });
 
     let effective = matching_tags[0].clone();
-    tracing::info!(
-        "🏷️  Resolved '{}' -> '{}' for version gap calculation",
-        current_tag,
-        effective
-    );
     effective
 }
 
@@ -431,27 +434,37 @@ async fn check_container_updates(state: &AppState, container: &Container) -> Res
 
     // Resolve effective tag: if current tag isn't semver (e.g. "latest"),
     // find the most precise semver tag that shares the same digest
-    let effective_tag = resolve_effective_tag(
+    // We need TWO resolutions:
+    // 1. LOCAL effective tag (using local digest) - for version gap calculation
+    // 2. REMOTE effective tag (using remote digest) - for display purposes
+    let local_effective_tag = resolve_effective_tag(
         client.as_ref(),
         &image_ref.repository,
         &image_ref.tag,
+        &container.image_digest,
         &all_tags,
     ).await;
 
-    // Calculate version gap using the effective tag
+    // Calculate version gap using the LOCAL effective tag
     let version_gap = if all_tags.is_empty() {
         -1
     } else {
-        count_newer_versions(&effective_tag, &all_tags)
+        count_newer_versions(&local_effective_tag, &all_tags)
     };
 
     if version_gap > 0 {
         tracing::info!(
-            "📊 {} is {} version(s) behind (effective tag: {}, original: {})",
+            "📊 {} is {} version(s) behind (local effective: {}, original: {})",
             container.name,
             version_gap,
-            effective_tag,
+            local_effective_tag,
             image_ref.tag
+        );
+    } else if version_gap == 0 && parse_semver(&local_effective_tag).is_some() {
+        tracing::info!(
+            "✅ {} is up to date (local effective: {})",
+            container.name,
+            local_effective_tag
         );
     }
 
