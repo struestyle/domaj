@@ -2,6 +2,7 @@
 //!
 //! Handles cron-based scheduling of container update checks.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 use anyhow::Result;
 use tokio_cron_scheduler::{Job, JobScheduler};
@@ -9,6 +10,11 @@ use tokio_cron_scheduler::{Job, JobScheduler};
 use crate::db::{CheckType, Container, Server};
 use crate::registry::{get_registry_client, ImageReference, RegistryClientDyn};
 use crate::AppState;
+
+/// Cache for digest lookups: (repository, tag) -> digest
+/// Shared across all container checks during a single scan to avoid
+/// redundant API calls and Docker Hub rate limiting (429).
+type DigestCache = HashMap<(String, String), String>;
 
 /// Scheduler wrapper
 pub struct Scheduler {
@@ -65,6 +71,7 @@ pub async fn run_scan(state: &AppState) -> Result<()> {
     tracing::info!("Found {} servers to scan", servers.len());
 
     let mut total_updates = 0;
+    let mut digest_cache = DigestCache::new();
 
     for server in &servers {
         tracing::info!("Scanning server: {}", server.name);
@@ -84,7 +91,7 @@ pub async fn run_scan(state: &AppState) -> Result<()> {
         .await?;
 
         for container in &containers {
-            match check_container_updates(state, container).await {
+            match check_container_updates(state, container, &mut digest_cache).await {
                 Ok(has_update) => {
                     if has_update {
                         total_updates += 1;
@@ -300,6 +307,7 @@ async fn resolve_effective_tag(
     current_tag: &str,
     digest: &str,
     all_tags: &[String],
+    digest_cache: &mut DigestCache,
 ) -> String {
     // If current tag is already semver-parseable, use it directly
     if parse_semver(current_tag).is_some() {
@@ -356,7 +364,7 @@ async fn resolve_effective_tag(
 
     // Limit to avoid too many API calls
     let check_limit = 100;
-    let tags_to_check: Vec<&&String> = semver_tags.iter().take(check_limit).collect();
+    let tags_to_check: Vec<&String> = semver_tags.into_iter().take(check_limit).collect();
 
     let mut matching_tags: Vec<String> = Vec::new();
 
@@ -367,27 +375,15 @@ async fn resolve_effective_tag(
         &digest[..20.min(digest.len())]
     );
 
-    // Check digests concurrently
-    let futures: Vec<_> = tags_to_check
-        .iter()
-        .map(|tag| {
-            let tag_str = tag.to_string();
-            let repo = repository.to_string();
-            async move {
-                match client.get_digest_dyn(&repo, &tag_str).await {
-                    Ok(digest) => Some((tag_str, digest)),
-                    Err(_) => None,
+    // Check digests using cache
+    for tag in &tags_to_check {
+        match cached_get_digest(client, repository, tag, digest_cache).await {
+            Ok(tag_digest) => {
+                if tag_digest == digest {
+                    matching_tags.push(tag.to_string());
                 }
             }
-        })
-        .collect();
-
-    let results = futures_util::future::join_all(futures).await;
-
-    for result in results.into_iter().flatten() {
-        let (tag, tag_digest) = result;
-        if tag_digest == digest {
-            matching_tags.push(tag);
+            Err(_) => {} // skip tags we can't resolve
         }
     }
 
@@ -406,8 +402,26 @@ async fn resolve_effective_tag(
     effective
 }
 
+/// Get a digest from cache, or fetch from registry and cache the result.
+async fn cached_get_digest(
+    client: &dyn RegistryClientDyn,
+    repository: &str,
+    tag: &str,
+    cache: &mut DigestCache,
+) -> Result<String> {
+    let key = (repository.to_string(), tag.to_string());
+    if let Some(cached) = cache.get(&key) {
+        return Ok(cached.clone());
+    }
+    
+    let digest = client.get_digest_dyn(repository, tag).await
+        .map_err(|e| anyhow::anyhow!("{}", e))?;
+    cache.insert(key, digest.clone());
+    Ok(digest)
+}
+
 /// Check for updates for a single container
-async fn check_container_updates(state: &AppState, container: &Container) -> Result<bool> {
+async fn check_container_updates(state: &AppState, container: &Container, digest_cache: &mut DigestCache) -> Result<bool> {
     let image_ref = ImageReference::parse(&container.image);
     
     // Look up credentials for this registry (merged env + DB)
@@ -443,6 +457,7 @@ async fn check_container_updates(state: &AppState, container: &Container) -> Res
         &image_ref.tag,
         &container.image_digest,
         &all_tags,
+        digest_cache,
     ).await;
 
     // Calculate version gap using the LOCAL effective tag
@@ -469,7 +484,7 @@ async fn check_container_updates(state: &AppState, container: &Container) -> Res
     }
 
     // Check 1: Same tag comparison
-    match client.get_digest_dyn(&image_ref.repository, &image_ref.tag).await {
+    match cached_get_digest(client.as_ref(), &image_ref.repository, &image_ref.tag, digest_cache).await {
         Ok(remote_digest) => {
             let local_digest = container.image_digest.clone();
             let has_update = !local_digest.is_empty() && local_digest != remote_digest;
@@ -520,7 +535,7 @@ async fn check_container_updates(state: &AppState, container: &Container) -> Res
 
     // Check 2: Latest tag comparison (if not already using latest)
     if image_ref.tag != "latest" {
-        match client.get_digest_dyn(&image_ref.repository, "latest").await {
+        match cached_get_digest(client.as_ref(), &image_ref.repository, "latest", digest_cache).await {
             Ok(latest_digest) => {
                 let local_digest = container.image_digest.clone();
                 let has_update = !local_digest.is_empty() && local_digest != latest_digest;
