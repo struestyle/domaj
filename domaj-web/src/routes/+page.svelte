@@ -50,6 +50,7 @@
                     getContainers(),
                     getUpdates(),
                 ]);
+                lastScanDate = new Date();
             } catch (e) {
                 /* ignore */
             }
@@ -69,6 +70,16 @@
             error = e.message;
         } finally {
             loading = false;
+            // Compute last scan date from updates
+            if (updates.length > 0) {
+                const dates = updates
+                    .map((u) => u.last_checked)
+                    .filter(Boolean)
+                    .map((d) => new Date(d));
+                if (dates.length > 0) {
+                    lastScanDate = new Date(Math.max(...dates));
+                }
+            }
         }
     });
 
@@ -203,6 +214,8 @@
             scanning = false;
         }
     }
+
+    let lastScanDate = null;
 </script>
 
 <svelte:head>
@@ -215,30 +228,49 @@
             <h1>Dashboard</h1>
             <p class="text-muted">Vue d'ensemble de vos instances Docker</p>
         </div>
-        <button
-            class="btn btn-primary"
-            on:click={triggerScan}
-            disabled={scanning}
-        >
-            {#if scanning}
-                <span class="spinner"></span>
-                Scan en cours...
-            {:else}
-                <svg
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="2"
-                    width="16"
-                    height="16"
-                    style="vertical-align: middle; margin-right: 6px;"
-                >
-                    <circle cx="11" cy="11" r="8"></circle>
-                    <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
-                </svg>
-                Scanner
+        <div class="scan-area">
+            <button
+                class="btn btn-primary"
+                on:click={triggerScan}
+                disabled={scanning}
+            >
+                {#if scanning}
+                    <span class="spinner"></span>
+                    Scan en cours...
+                {:else}
+                    <svg
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2"
+                        width="16"
+                        height="16"
+                        style="vertical-align: middle; margin-right: 6px;"
+                    >
+                        <circle cx="11" cy="11" r="8"></circle>
+                        <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                    </svg>
+                    Scanner
+                {/if}
+            </button>
+            {#if lastScanDate}
+                <span class="last-scan text-muted">
+                    <svg
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2"
+                        width="14"
+                        height="14"
+                        style="vertical-align: middle; margin-right: 4px;"
+                        ><circle cx="12" cy="12" r="10"></circle><polyline
+                            points="12 6 12 12 16 14"
+                        ></polyline></svg
+                    >
+                    {lastScanDate.toLocaleString("fr-FR")}
+                </span>
             {/if}
-        </button>
+        </div>
     </header>
 
     {#if loading}
@@ -723,6 +755,19 @@
         font-size: 2rem;
         font-weight: 700;
         margin-bottom: var(--spacing-xs);
+    }
+
+    .scan-area {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-end;
+        gap: var(--spacing-sm);
+    }
+
+    .last-scan {
+        font-size: 0.8rem;
+        display: flex;
+        align-items: center;
     }
 
     .stat-card {

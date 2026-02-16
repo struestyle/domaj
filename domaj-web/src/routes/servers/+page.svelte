@@ -218,11 +218,44 @@
         </div>
     {:else if error}
         <div class="card error-card">
-            <p>⚠️ {error}</p>
+            <p>
+                <svg
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    width="16"
+                    height="16"
+                    style="vertical-align: middle; margin-right: 4px;"
+                    ><path
+                        d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"
+                    ></path><line x1="12" y1="9" x2="12" y2="13"></line><line
+                        x1="12"
+                        y1="17"
+                        x2="12.01"
+                        y2="17"
+                    ></line></svg
+                >
+                {error}
+            </p>
         </div>
     {:else if servers.length === 0}
         <div class="empty-state card">
-            <div class="empty-icon">📦</div>
+            <div class="empty-icon">
+                <svg
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="1.5"
+                    width="48"
+                    height="48"
+                    ><path
+                        d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"
+                    ></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"
+                    ></polyline><line x1="12" y1="22.08" x2="12" y2="12"
+                    ></line></svg
+                >
+            </div>
             <h3>Aucun serveur configuré</h3>
             <p class="text-muted">
                 Ajoutez votre premier serveur pour commencer.

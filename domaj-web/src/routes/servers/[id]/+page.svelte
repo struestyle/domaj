@@ -56,7 +56,26 @@
         <div class="skeleton" style="height: 200px;"></div>
     {:else if error}
         <div class="card error-card">
-            <p>⚠️ {error}</p>
+            <p>
+                <svg
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    width="16"
+                    height="16"
+                    style="vertical-align: middle; margin-right: 4px;"
+                    ><path
+                        d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"
+                    ></path><line x1="12" y1="9" x2="12" y2="13"></line><line
+                        x1="12"
+                        y1="17"
+                        x2="12.01"
+                        y2="17"
+                    ></line></svg
+                >
+                {error}
+            </p>
             <a href="/servers" class="btn btn-secondary mt-md"
                 >← Retour aux serveurs</a
             >
@@ -81,13 +100,40 @@
                     on:click={handleSync}
                     disabled={syncing}
                 >
-                    {syncing ? "🔄 Synchronisation..." : "🔄 Synchroniser"}
+                    <svg
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2"
+                        width="16"
+                        height="16"
+                        style="vertical-align: middle; margin-right: 6px;"
+                        class:spinning={syncing}
+                        ><polyline points="23 4 23 10 17 10"
+                        ></polyline><polyline points="1 20 1 14 7 14"
+                        ></polyline><path
+                            d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"
+                        ></path></svg
+                    >
+                    {syncing ? "Synchronisation..." : "Synchroniser"}
                 </button>
             </div>
         </header>
 
         <section class="section">
-            <h2>🐳 Conteneurs ({containers.length})</h2>
+            <h2>
+                <svg
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    width="20"
+                    height="20"
+                    style="vertical-align: middle; margin-right: 6px;"
+                    ><rect x="2" y="7" width="20" height="14" rx="2" ry="2"
+                    ></rect><polyline points="17 2 12 7 7 2"></polyline></svg
+                >Conteneurs ({containers.length})
+            </h2>
 
             {#if containers.length === 0}
                 <div class="empty-state card">
@@ -127,9 +173,13 @@
                                                 ? 'badge-success'
                                                 : 'badge-warning'}"
                                         >
-                                            {container.status.includes("Up")
-                                                ? "🟢"
-                                                : "🟡"}
+                                            <span
+                                                class="status-dot {container.status.includes(
+                                                    'Up',
+                                                )
+                                                    ? 'dot-up'
+                                                    : 'dot-down'}"
+                                            ></span>
                                             {container.status.split(" ")[0]}
                                         </span>
                                     </td>
@@ -150,7 +200,26 @@
         </section>
 
         <section class="section">
-            <h2>📋 Informations</h2>
+            <h2>
+                <svg
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    width="20"
+                    height="20"
+                    style="vertical-align: middle; margin-right: 6px;"
+                    ><path
+                        d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"
+                    ></path><polyline points="14 2 14 8 20 8"></polyline><line
+                        x1="16"
+                        y1="13"
+                        x2="8"
+                        y2="13"
+                    ></line><line x1="16" y1="17" x2="8" y2="17"
+                    ></line><polyline points="10 9 9 9 8 9"></polyline></svg
+                >Informations
+            </h2>
             <div class="info-grid card">
                 <div class="info-item">
                     <div class="info-label">Dernière synchronisation</div>
@@ -256,6 +325,34 @@
         font-weight: 500;
     }
 
+    .status-dot {
+        display: inline-block;
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        margin-right: 6px;
+        vertical-align: middle;
+    }
+
+    .dot-up {
+        background: var(--color-success);
+        box-shadow: 0 0 6px var(--color-success);
+    }
+
+    .dot-down {
+        background: #eab308;
+        box-shadow: 0 0 6px #eab308;
+    }
+
+    .spinning {
+        animation: spin 1s linear infinite;
+    }
+
+    @keyframes spin {
+        to {
+            transform: rotate(360deg);
+        }
+    }
 
     .empty-state {
         text-align: center;
