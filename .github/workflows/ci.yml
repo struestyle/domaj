@@ -77,6 +77,7 @@ jobs:
     name: Security Audit (${{ matrix.component }})
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
         component: [domaj-server, domaj-agent]
     steps:
@@ -91,4 +92,5 @@ jobs:
 
       - name: Run cargo audit
         working-directory: ./${{ matrix.component }}
-        run: cargo audit
+        # RUSTSEC-2023-0071: rsa Marvin Attack - no fix available, comes from sqlx-mysql (unused)
+        run: cargo audit --ignore RUSTSEC-2023-0071
