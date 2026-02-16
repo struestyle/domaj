@@ -83,8 +83,21 @@
         }
     }
 
-    let showPatches = true;
-    let showNew = true;
+    let showPatches =
+        typeof localStorage !== "undefined"
+            ? (localStorage.getItem("showPatches") ?? "true") === "true"
+            : true;
+    let showNew =
+        typeof localStorage !== "undefined"
+            ? (localStorage.getItem("showNew") ?? "true") === "true"
+            : true;
+
+    $: if (typeof localStorage !== "undefined") {
+        localStorage.setItem("showPatches", showPatches);
+    }
+    $: if (typeof localStorage !== "undefined") {
+        localStorage.setItem("showNew", showNew);
+    }
 
     $: sortedUpdates = [...updates].sort((a, b) => {
         let aVal, bVal;
