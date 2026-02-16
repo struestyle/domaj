@@ -497,7 +497,24 @@ async fn check_container_updates(state: &AppState, container: &Container) -> Res
             }
         }
         Err(e) => {
-            tracing::debug!("Failed to get digest for {}: {}", container.image, e);
+            tracing::warn!("Failed to get digest for {}: {}", container.image, e);
+            // Fallback: insert a row based on version_gap alone so the container
+            // still appears in the dashboard even if digest fetch is rate-limited
+            if version_gap > 0 {
+                let local_digest = container.image_digest.clone();
+                sqlx::query(
+                    "INSERT INTO update_checks (container_id, check_type, local_digest, remote_digest, has_update, version_gap) VALUES ($1, $2, $3, $4, $5, $6)",
+                )
+                .bind(container.id)
+                .bind(CheckType::SameTag.to_string())
+                .bind(&local_digest)
+                .bind("")
+                .bind(1)
+                .bind(version_gap)
+                .execute(&state.db)
+                .await?;
+                has_any_update = true;
+            }
         }
     }
 
@@ -531,7 +548,7 @@ async fn check_container_updates(state: &AppState, container: &Container) -> Res
                 }
             }
             Err(e) => {
-                tracing::debug!("Failed to get latest digest for {}: {}", container.image, e);
+                tracing::warn!("Failed to get latest digest for {}: {}", container.image, e);
             }
         }
     }
