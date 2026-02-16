@@ -287,16 +287,10 @@ async fn resolve_effective_tag(
     client: &dyn RegistryClientDyn,
     repository: &str,
     current_tag: &str,
-    local_digest: &str,
     all_tags: &[String],
 ) -> String {
     // If current tag is already semver-parseable, use it directly
     if parse_semver(current_tag).is_some() {
-        return current_tag.to_string();
-    }
-
-    // No digest to compare against
-    if local_digest.is_empty() {
         return current_tag.to_string();
     }
 
@@ -305,19 +299,66 @@ async fn resolve_effective_tag(
         current_tag
     );
 
-    // Fetch digests for semver-parseable tags concurrently to find matches
-    let semver_tags: Vec<&String> = all_tags
+    // Get the REMOTE digest for the current tag (not the local one, which may be outdated)
+    let current_remote_digest = match client.get_digest_dyn(repository, current_tag).await {
+        Ok(digest) => digest,
+        Err(e) => {
+            tracing::debug!("Cannot resolve '{}': failed to get remote digest: {}", current_tag, e);
+            return current_tag.to_string();
+        }
+    };
+
+    tracing::debug!(
+        "Remote digest for '{}': {}",
+        current_tag,
+        &current_remote_digest[..20.min(current_remote_digest.len())]
+    );
+
+    // Determine the suffix pattern to match.
+    // For "alpine" -> look for tags ending with "-alpine" (like "7.4.2-alpine")
+    // For "latest" -> look for tags without suffix (like "7.4.2")
+    let suffix_pattern = if current_tag == "latest" {
+        None // match tags without any suffix
+    } else {
+        Some(format!("-{}", current_tag)) // e.g. "-alpine"
+    };
+
+    // Filter semver-parseable tags that match the suffix pattern
+    let mut semver_tags: Vec<&String> = all_tags
         .iter()
-        .filter(|t| parse_semver(t).is_some())
+        .filter(|t| {
+            if parse_semver(t).is_none() {
+                return false;
+            }
+            match &suffix_pattern {
+                Some(suffix) => t.ends_with(suffix),
+                None => !t.contains('-'), // no suffix for "latest" resolution
+            }
+        })
         .collect();
 
-    // Limit to avoid too many API calls (take the most recent-looking tags)
-    let check_limit = 50;
-    let tags_to_check: Vec<&&String> = semver_tags.iter().rev().take(check_limit).collect();
+    // Sort by version descending so we check newest first
+    semver_tags.sort_by(|a, b| {
+        let va = parse_semver(a).unwrap_or((0, 0, 0));
+        let vb = parse_semver(b).unwrap_or((0, 0, 0));
+        vb.cmp(&va)
+    });
+
+    // Limit to avoid too many API calls
+    let check_limit = 100;
+    let tags_to_check: Vec<&&String> = semver_tags.iter().take(check_limit).collect();
 
     let mut matching_tags: Vec<String> = Vec::new();
 
-    // Check digests concurrently in batches
+    tracing::info!(
+        "🔍 Resolving '{}': checking {} candidate tags (out of {} semver) against digest {}...",
+        current_tag,
+        tags_to_check.len(),
+        semver_tags.len(),
+        &current_remote_digest[..20.min(current_remote_digest.len())]
+    );
+
+    // Check digests concurrently
     let futures: Vec<_> = tags_to_check
         .iter()
         .map(|tag| {
@@ -336,13 +377,13 @@ async fn resolve_effective_tag(
 
     for result in results.into_iter().flatten() {
         let (tag, digest) = result;
-        if digest == local_digest {
+        if digest == current_remote_digest {
             matching_tags.push(tag);
         }
     }
 
     if matching_tags.is_empty() {
-        tracing::debug!("No semver tags match digest for '{}'", current_tag);
+        tracing::info!("⚠️ No semver tags match remote digest for '{}'", current_tag);
         return current_tag.to_string();
     }
 
@@ -394,7 +435,6 @@ async fn check_container_updates(state: &AppState, container: &Container) -> Res
         client.as_ref(),
         &image_ref.repository,
         &image_ref.tag,
-        &container.image_digest,
         &all_tags,
     ).await;
 
