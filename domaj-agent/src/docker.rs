@@ -206,7 +206,6 @@ impl DockerClient {
         
         // Get the container's current config for recreation
         let inspect = self.docker.inspect_container(&full_id, None).await?;
-        let was_running = inspect.state.as_ref().and_then(|s| s.running).unwrap_or(false);
         
         // Pull the new image
         tracing::info!("📥 Pulling image: {}", new_image);
@@ -243,11 +242,9 @@ impl DockerClient {
         }
         tracing::info!("✅ Image pulled successfully");
         
-        // Stop the container if running
-        if was_running {
-            tracing::info!("⏹️ Stopping container...");
-            self.docker.stop_container(&full_id, Some(StopContainerOptions { t: 30 })).await?;
-        }
+        // Stop the container (if running)
+        tracing::info!("⏹️ Stopping container...");
+        let _ = self.docker.stop_container(&full_id, Some(StopContainerOptions { t: 30 })).await;
         
         // Get the container config for recreation
         let config = inspect.config.ok_or_else(|| anyhow!("No config found for container"))?;
@@ -306,11 +303,9 @@ impl DockerClient {
         
         self.docker.create_container(Some(create_options), new_config).await?;
         
-        // Start the new container if it was running before
-        if was_running {
-            tracing::info!("▶️ Starting new container...");
-            self.docker.start_container(container_name, None::<StartContainerOptions<String>>).await?;
-        }
+        // Start the new container
+        tracing::info!("▶️ Starting new container...");
+        self.docker.start_container(container_name, None::<StartContainerOptions<String>>).await?;
         
         tracing::info!("✅ Container '{}' updated successfully", container_name);
         

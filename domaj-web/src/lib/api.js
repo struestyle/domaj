@@ -152,3 +152,9 @@ export async function updateSetting(key, value) {
         body: JSON.stringify({ value })
     });
 }
+
+export async function testDockerCredentials() {
+    return fetchApi('/settings/test-docker', {
+        method: 'POST'
+    });
+}

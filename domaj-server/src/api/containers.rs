@@ -195,6 +195,22 @@ pub async fn list_updates(
 pub async fn trigger_scan(
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
+    // Check if any servers are configured
+    let server_count: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM servers")
+        .fetch_one(&state.db)
+        .await
+        .map_err(|e| {
+            tracing::error!("Failed to count servers: {}", e);
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+
+    if server_count.0 == 0 {
+        return Ok(Json(serde_json::json!({
+            "status": "no_servers",
+            "message": "Aucun serveur configuré"
+        })));
+    }
+
     // Run the scan in background
     let state_clone = state.clone();
     tokio::spawn(async move {

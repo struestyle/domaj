@@ -9,8 +9,8 @@
 - [x] Déploiement Docker Compose
 
 ## Priorité — UX Dashboard
-- [ ] Distinction claire entre patch (same tag) et nouvelle version (latest) dans le tableau de mises à jour
-- [ ] Ne pas afficher les conteneurs à jour dans le dashboard (uniquement ceux nécessitant une action)
+- [x] Distinction claire entre patch (same tag) et nouvelle version (latest) dans le tableau de mises à jour
+- [x] Ne pas afficher les conteneurs à jour dans le dashboard (uniquement ceux nécessitant une action)
 
 ## Version 1.1 - Notifications Avancées
 - [x] Intégration Telegram (API Bot via reqwest)

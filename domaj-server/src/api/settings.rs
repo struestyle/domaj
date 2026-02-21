@@ -237,3 +237,71 @@ pub async fn get_auto_rollback_delay(state: &AppState) -> u64 {
     
     result.map(|(v,)| v.parse().unwrap_or(30)).unwrap_or(30)
 }
+
+/// Test Docker Hub credentials by attempting to authenticate
+pub async fn test_docker_credentials(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    // Get effective credentials (env var takes priority)
+    let username = if let Some(ref u) = state.config.docker_username {
+        u.clone()
+    } else {
+        let result: Option<(String,)> = sqlx::query_as(
+            "SELECT value FROM settings WHERE key = 'docker_username'"
+        )
+        .fetch_optional(&state.db)
+        .await
+        .unwrap_or(None);
+        result.map(|(v,)| v).unwrap_or_default()
+    };
+
+    let password = if let Some(ref p) = state.config.docker_password {
+        p.clone()
+    } else {
+        let result: Option<(String,)> = sqlx::query_as(
+            "SELECT value FROM settings WHERE key = 'docker_password'"
+        )
+        .fetch_optional(&state.db)
+        .await
+        .unwrap_or(None);
+        result.map(|(v,)| v).unwrap_or_default()
+    };
+
+    if username.is_empty() || password.is_empty() {
+        return Err((StatusCode::BAD_REQUEST, Json(serde_json::json!({
+            "error": "Identifiants manquants"
+        }))));
+    }
+
+    // Test against Docker Hub API
+    let client = reqwest::Client::new();
+    let resp = client
+        .post("https://hub.docker.com/v2/users/login")
+        .json(&serde_json::json!({
+            "username": username,
+            "password": password,
+        }))
+        .send()
+        .await
+        .map_err(|e| {
+            tracing::error!("Failed to reach Docker Hub: {}", e);
+            (StatusCode::BAD_GATEWAY, Json(serde_json::json!({
+                "error": format!("Impossible de contacter Docker Hub: {}", e)
+            })))
+        })?;
+
+    if resp.status().is_success() {
+        tracing::info!("✅ Docker Hub credentials validated for user '{}'", username);
+        Ok(Json(serde_json::json!({
+            "status": "ok",
+            "message": format!("Authentification réussie ({})", username)
+        })))
+    } else {
+        let status = resp.status();
+        let body = resp.text().await.unwrap_or_default();
+        tracing::warn!("❌ Docker Hub auth failed for '{}': {} - {}", username, status, body);
+        Err((StatusCode::UNAUTHORIZED, Json(serde_json::json!({
+            "error": "Identifiants Docker Hub invalides"
+        }))))
+    }
+}

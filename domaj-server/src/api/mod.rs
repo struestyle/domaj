@@ -93,6 +93,7 @@ pub fn router(jwt_secret: String) -> Router<Arc<AppState>> {
         
         // Settings
         .route("/settings", get(settings::get_settings))
+        .route("/settings/test-docker", post(settings::test_docker_credentials))
         .route("/settings/:key", put(settings::update_setting))
         .layer(middleware::from_fn_with_state(jwt_secret, auth::auth_middleware));
     

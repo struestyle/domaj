@@ -316,6 +316,53 @@ fn count_newer_versions(current_tag: &str, all_tags: &[String]) -> i32 {
     newer_versions.len() as i32
 }
 
+/// Find the newest matching tag in the same family (same suffix, same depth).
+/// Returns the tag name string of the newest version, or None if no newer version exists.
+fn find_newest_tag(current_tag: &str, all_tags: &[String]) -> Option<String> {
+    let current = parse_semver(current_tag)?;
+
+    let normalize_suffix = |s: &str| -> String {
+        let stripped = s.strip_prefix('v').unwrap_or(s);
+        let suffix = stripped.split_once('-').map(|(_, s)| s).unwrap_or("");
+        if !suffix.is_empty() && suffix.chars().all(|c| c.is_ascii_hexdigit()) {
+            String::new()
+        } else {
+            suffix.to_string()
+        }
+    };
+
+    let current_suffix = normalize_suffix(current_tag);
+    let stripped = current_tag.strip_prefix('v').unwrap_or(current_tag);
+    let depth = stripped.split('-').next().unwrap_or("").split('.').count();
+
+    let mut best: Option<((u64, u64, u64), String)> = None;
+
+    for tag in all_tags {
+        let t = tag.strip_prefix('v').unwrap_or(tag);
+
+        let tag_suffix = normalize_suffix(tag);
+        if tag_suffix != current_suffix {
+            continue;
+        }
+
+        let tag_depth = t.split('-').next().unwrap_or("").split('.').count();
+        if tag_depth != depth {
+            continue;
+        }
+
+        if let Some(ver) = parse_semver(tag) {
+            if ver > current {
+                if best.is_none() || ver > best.as_ref().unwrap().0 {
+                    best = Some((ver, tag.clone()));
+                }
+            }
+        }
+    }
+
+    best.map(|(_, tag)| tag)
+}
+
+
 /// Resolve the effective semver tag for a given digest.
 /// When the container's tag is not semver-parseable (e.g. "latest", "alpine"),
 /// find other tags in the repo that share the same digest and pick the most precise one.
@@ -545,17 +592,31 @@ async fn check_container_updates(state: &AppState, container: &Container, digest
             // still appears in the dashboard even if digest fetch is rate-limited
             if version_gap > 0 {
                 let local_digest = container.image_digest.clone();
-                // Try to get the remote digest from cache — we want the NEWEST tag's digest
-                // (resolve_effective_tag may have cached some tags during its search)
                 let mut remote_digest = String::new();
-                // Look for the newest semver tag's digest in the cache
-                for tag in &all_tags {
-                    if parse_semver(tag).is_some() {
-                        let cache_key = (image_ref.repository.clone(), tag.clone());
-                        if let Some(cached) = digest_cache.get(&cache_key) {
-                            if *cached != local_digest {
-                                remote_digest = cached.clone();
-                                break;
+                // Find the newest available tag in the same family
+                let newest_tag = find_newest_tag(&local_effective_tag, &all_tags);
+                // Try to fetch the digest of the newest tag directly
+                if let Some(ref tag_name) = newest_tag {
+                    match cached_get_digest(client.as_ref(), &image_ref.repository, tag_name, digest_cache).await {
+                        Ok(digest) => {
+                            remote_digest = digest;
+                            tracing::info!("🔄 Fetched digest for newest tag {} of {}", tag_name, container.name);
+                        }
+                        Err(e2) => {
+                            tracing::debug!("Could not fetch digest for newest tag {} of {}: {}", tag_name, container.name, e2);
+                        }
+                    }
+                }
+                // Fall back to cache if direct fetch also failed
+                if remote_digest.is_empty() {
+                    for tag in &all_tags {
+                        if parse_semver(tag).is_some() {
+                            let cache_key = (image_ref.repository.clone(), tag.clone());
+                            if let Some(cached) = digest_cache.get(&cache_key) {
+                                if *cached != local_digest {
+                                    remote_digest = cached.clone();
+                                    break;
+                                }
                             }
                         }
                     }

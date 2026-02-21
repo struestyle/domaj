@@ -1,6 +1,10 @@
 <script>
     import { onMount } from "svelte";
-    import { getSettings, updateSetting } from "$lib/api.js";
+    import {
+        getSettings,
+        updateSetting,
+        testDockerCredentials,
+    } from "$lib/api.js";
     import { toasts } from "$lib/stores/toast.js";
     import { theme, toggleTheme } from "$lib/stores/theme.js";
 
@@ -55,9 +59,20 @@
         try {
             await updateSetting("docker_username", dockerUsername);
             await updateSetting("docker_password", dockerPassword);
+            // Test the credentials against Docker Hub
+            try {
+                const result = await testDockerCredentials();
+                toasts.success(
+                    result.message || "Identifiants Docker Hub validés ✓",
+                );
+            } catch (testErr) {
+                toasts.error(
+                    testErr.message ||
+                        "Identifiants sauvegardés mais invalides",
+                );
+            }
             settings = await getSettings();
             dockerPassword = "";
-            toasts.success("Identifiants Docker Hub sauvegardés");
         } catch (err) {
             toasts.error(err.message);
         } finally {
@@ -628,13 +643,22 @@
 
     .delay-input input {
         width: 70px;
-        padding: 6px 10px;
+        padding: 8px 10px;
         background: var(--bg-tertiary);
         border: 1px solid var(--border-color);
-        border-radius: var(--radius-sm);
+        border-radius: var(--radius-md, 8px);
         color: var(--text-primary);
         font-size: 0.85rem;
         text-align: center;
+        transition:
+            border-color var(--transition-fast),
+            box-shadow var(--transition-fast);
+    }
+
+    .delay-input input:focus {
+        outline: none;
+        border-color: var(--color-primary);
+        box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.15);
     }
 
     .delay-input input:disabled {
@@ -648,18 +672,22 @@
 
     /* Text input for Docker Hub */
     .text-input {
-        padding: 6px 10px;
+        padding: 8px 14px;
         background: var(--bg-tertiary);
         border: 1px solid var(--border-color);
-        border-radius: var(--radius-sm);
+        border-radius: var(--radius-md, 8px);
         color: var(--text-primary);
         font-size: 0.85rem;
-        min-width: 200px;
+        min-width: 220px;
+        transition:
+            border-color var(--transition-fast),
+            box-shadow var(--transition-fast);
     }
 
     .text-input:focus {
         outline: none;
         border-color: var(--color-primary);
+        box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.15);
     }
 
     .text-input.locked {

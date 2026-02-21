@@ -125,7 +125,30 @@
         localStorage.setItem("showNew", showNew);
     }
 
-    $: sortedUpdates = [...updates].sort((a, b) => {
+    // Expand dual-update containers into separate rows
+    $: expandedUpdates = updates.flatMap((u) => {
+        const rows = [];
+        if (u.same_tag_update) {
+            rows.push({
+                ...u,
+                _type: "patch",
+                latest_update: false,
+                latest_tag: "",
+                latest_digest: "",
+            });
+        }
+        if (u.latest_update) {
+            rows.push({
+                ...u,
+                _type: "latest",
+                same_tag_update: false,
+                same_tag_digest: "",
+            });
+        }
+        return rows;
+    });
+
+    $: sortedUpdates = [...expandedUpdates].sort((a, b) => {
         let aVal, bVal;
 
         if (sortColumn === "image_name") {
@@ -135,8 +158,8 @@
             aVal = parseImage(a.image).tag;
             bVal = parseImage(b.image).tag;
         } else if (sortColumn === "update_type") {
-            aVal = a.same_tag_update ? "patch" : "new";
-            bVal = b.same_tag_update ? "patch" : "new";
+            aVal = a._type;
+            bVal = b._type;
         } else if (sortColumn === "versions_behind") {
             aVal = a.versions_behind;
             bVal = b.versions_behind;
@@ -154,8 +177,8 @@
     });
 
     $: filteredUpdates = sortedUpdates.filter((u) => {
-        if (!showPatches && u.same_tag_update && !u.latest_update) return false;
-        if (!showNew && u.latest_update && !u.same_tag_update) return false;
+        if (!showPatches && u._type === "patch") return false;
+        if (!showNew && u._type === "latest") return false;
         return true;
     });
 
@@ -210,14 +233,22 @@
                 headers: token ? { Authorization: `Bearer ${token}` } : {},
             });
             if (response.ok) {
-                toasts.success("Scan lancé en arrière-plan");
-                // Keep scanning=true until scan_completed WebSocket event
-                // Safety timeout after 60 seconds
-                scanTimeout = setTimeout(() => {
+                const data = await response.json();
+                if (data.status === "no_servers") {
+                    toasts.info(
+                        "Aucun serveur configuré — ajoutez un serveur d'abord",
+                    );
                     scanning = false;
-                    scanTimeout = null;
-                    toasts.info("Timeout du scan (60s)");
-                }, 60000);
+                } else {
+                    toasts.success("Scan lancé en arrière-plan");
+                    // Keep scanning=true until scan_completed WebSocket event
+                    // Safety timeout after 60 seconds
+                    scanTimeout = setTimeout(() => {
+                        scanning = false;
+                        scanTimeout = null;
+                        toasts.info("Timeout du scan (60s)");
+                    }, 60000);
+                }
             } else {
                 toasts.error("Erreur lors du lancement du scan");
                 scanning = false;
@@ -551,7 +582,7 @@
                                         </span>
                                     </td>
                                     <td>
-                                        {#if update.same_tag_update}
+                                        {#if update._type === "patch"}
                                             <span class="badge badge-warning">
                                                 <svg
                                                     class="badge-icon"
@@ -572,8 +603,7 @@
                                                 </svg>
                                                 Patch
                                             </span>
-                                        {/if}
-                                        {#if update.latest_update}
+                                        {:else}
                                             <span class="badge badge-info">
                                                 <svg
                                                     class="badge-icon"
@@ -610,8 +640,8 @@
                                                 >N/A</span
                                             >
                                         {:else if update.versions_behind === 0}
-                                            <span class="badge badge-success"
-                                                >À jour</span
+                                            <span class="badge badge-muted"
+                                                >—</span
                                             >
                                         {:else if update.versions_behind <= 3}
                                             <span class="badge badge-warning"
@@ -624,112 +654,105 @@
                                         {/if}
                                     </td>
                                     <td>
-                                        {#if update.latest_update || update.same_tag_update}
-                                            {#if update.same_tag_update}
-                                                {@const patchTag =
-                                                    update.image.split(
-                                                        ":",
-                                                    )[1] || "latest"}
-                                                <span
-                                                    class="tag-button"
-                                                    class:clickable={update.same_tag_digest}
-                                                    data-tooltip={update.same_tag_digest ||
-                                                        patchTag}
-                                                    on:click={() =>
-                                                        update.same_tag_digest &&
-                                                        copyToClipboard(
-                                                            update.same_tag_digest,
-                                                            "patch-" +
-                                                                update.container_name +
-                                                                update.server_name,
-                                                        )}
-                                                >
-                                                    {#if copiedId === "patch-" + update.container_name + update.server_name}
-                                                        <span
-                                                            class="copied-feedback"
-                                                            >Copié !</span
+                                        {#if update._type === "patch"}
+                                            {@const patchTag =
+                                                update.image.split(":")[1] ||
+                                                "latest"}
+                                            <span
+                                                class="tag-button"
+                                                class:clickable={update.same_tag_digest}
+                                                data-tooltip={update.same_tag_digest ||
+                                                    patchTag}
+                                                on:click={() =>
+                                                    update.same_tag_digest &&
+                                                    copyToClipboard(
+                                                        update.same_tag_digest,
+                                                        "patch-" +
+                                                            update.container_name +
+                                                            update.server_name,
+                                                    )}
+                                            >
+                                                {#if copiedId === "patch-" + update.container_name + update.server_name}
+                                                    <span
+                                                        class="copied-feedback"
+                                                        >Copié !</span
+                                                    >
+                                                {:else}
+                                                    <code>{patchTag}</code>
+                                                    {#if update.same_tag_digest}
+                                                        <svg
+                                                            class="copy-icon"
+                                                            viewBox="0 0 24 24"
+                                                            fill="none"
+                                                            stroke="currentColor"
+                                                            stroke-width="2"
                                                         >
-                                                    {:else}
-                                                        <code>{patchTag}</code>
-                                                        {#if update.same_tag_digest}
-                                                            <svg
-                                                                class="copy-icon"
-                                                                viewBox="0 0 24 24"
-                                                                fill="none"
-                                                                stroke="currentColor"
-                                                                stroke-width="2"
-                                                            >
-                                                                <rect
-                                                                    x="9"
-                                                                    y="9"
-                                                                    width="13"
-                                                                    height="13"
-                                                                    rx="2"
-                                                                    ry="2"
-                                                                ></rect>
-                                                                <path
-                                                                    d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"
-                                                                ></path>
-                                                            </svg>
-                                                        {/if}
+                                                            <rect
+                                                                x="9"
+                                                                y="9"
+                                                                width="13"
+                                                                height="13"
+                                                                rx="2"
+                                                                ry="2"
+                                                            ></rect>
+                                                            <path
+                                                                d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"
+                                                            ></path>
+                                                        </svg>
                                                     {/if}
-                                                </span>
-                                            {/if}
-                                            {#if update.latest_update}
-                                                {@const latestTag =
-                                                    update.latest_tag ||
-                                                    "latest"}
-                                                <span
-                                                    class="tag-button"
-                                                    class:clickable={update.latest_digest}
-                                                    data-tooltip={update.latest_digest ||
-                                                        latestTag}
-                                                    on:click={() =>
-                                                        update.latest_digest &&
-                                                        copyToClipboard(
-                                                            update.latest_digest,
-                                                            "latest-" +
-                                                                update.container_name +
-                                                                update.server_name,
-                                                        )}
-                                                >
-                                                    {#if copiedId === "latest-" + update.container_name + update.server_name}
-                                                        <span
-                                                            class="copied-feedback"
-                                                            >Copié !</span
-                                                        >
-                                                    {:else}
-                                                        <code>{latestTag}</code>
-                                                        {#if update.latest_digest}
-                                                            <svg
-                                                                class="copy-icon"
-                                                                viewBox="0 0 24 24"
-                                                                fill="none"
-                                                                stroke="currentColor"
-                                                                stroke-width="2"
-                                                            >
-                                                                <rect
-                                                                    x="9"
-                                                                    y="9"
-                                                                    width="13"
-                                                                    height="13"
-                                                                    rx="2"
-                                                                    ry="2"
-                                                                ></rect>
-                                                                <path
-                                                                    d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"
-                                                                ></path>
-                                                            </svg>
-                                                        {/if}
-                                                    {/if}
-                                                </span>
-                                            {/if}
+                                                {/if}
+                                            </span>
                                         {:else}
-                                            <span class="text-muted">—</span>
+                                            {@const latestTag =
+                                                update.latest_tag || "latest"}
+                                            <span
+                                                class="tag-button"
+                                                class:clickable={update.latest_digest}
+                                                data-tooltip={update.latest_digest ||
+                                                    latestTag}
+                                                on:click={() =>
+                                                    update.latest_digest &&
+                                                    copyToClipboard(
+                                                        update.latest_digest,
+                                                        "latest-" +
+                                                            update.container_name +
+                                                            update.server_name,
+                                                    )}
+                                            >
+                                                {#if copiedId === "latest-" + update.container_name + update.server_name}
+                                                    <span
+                                                        class="copied-feedback"
+                                                        >Copié !</span
+                                                    >
+                                                {:else}
+                                                    <code>{latestTag}</code>
+                                                    {#if update.latest_digest}
+                                                        <svg
+                                                            class="copy-icon"
+                                                            viewBox="0 0 24 24"
+                                                            fill="none"
+                                                            stroke="currentColor"
+                                                            stroke-width="2"
+                                                        >
+                                                            <rect
+                                                                x="9"
+                                                                y="9"
+                                                                width="13"
+                                                                height="13"
+                                                                rx="2"
+                                                                ry="2"
+                                                            ></rect>
+                                                            <path
+                                                                d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"
+                                                            ></path>
+                                                        </svg>
+                                                    {/if}
+                                                {/if}
+                                            </span>
                                         {/if}
                                     </td>
                                     <td class="actions-cell">
-                                        {#if update.same_tag_update}
+                                        {#if update._type === "patch"}
                                             <button
                                                 class="btn btn-sm btn-warning"
                                                 disabled={updatingContainers.has(
@@ -748,8 +771,7 @@
                                                     Patch
                                                 {/if}
                                             </button>
-                                        {/if}
-                                        {#if update.latest_update}
+                                        {:else}
                                             <button
                                                 class="btn btn-sm btn-success"
                                                 disabled={updatingContainers.has(
