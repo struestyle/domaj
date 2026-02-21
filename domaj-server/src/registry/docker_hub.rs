@@ -10,16 +10,19 @@ use super::RegistryClientDyn;
 /// Docker Hub API client
 pub struct DockerHubClient {
     client: reqwest::Client,
+    credentials: Option<(String, String)>,
 }
 
 impl DockerHubClient {
-    pub fn new() -> Self {
+    pub fn new(credentials: Option<(String, String)>) -> Self {
         Self {
             client: reqwest::Client::new(),
+            credentials,
         }
     }
 
-    /// Get an anonymous authentication token for Docker Hub
+    /// Get an authentication token for Docker Hub
+    /// Uses Basic Auth if credentials are provided (higher rate limit)
     async fn get_token(&self, repository: &str) -> Result<String> {
         #[derive(Deserialize)]
         struct TokenResponse {
@@ -31,9 +34,14 @@ impl DockerHubClient {
             repository
         );
 
-        let resp: TokenResponse = self
-            .client
-            .get(&url)
+        let mut req = self.client.get(&url);
+
+        // Use Basic Auth if credentials are available (200 pulls/6h vs 100 anonymous)
+        if let Some((username, password)) = &self.credentials {
+            req = req.basic_auth(username, Some(password));
+        }
+
+        let resp: TokenResponse = req
             .send()
             .await
             .context("Failed to get Docker Hub token")?
@@ -47,7 +55,7 @@ impl DockerHubClient {
 
 impl Default for DockerHubClient {
     fn default() -> Self {
-        Self::new()
+        Self::new(None)
     }
 }
 

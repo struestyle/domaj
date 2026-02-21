@@ -65,6 +65,12 @@ pub struct Config {
     
     /// Delay in seconds before checking container health after update
     pub auto_rollback_delay_secs: u64,
+    
+    /// Docker Hub username (optional, for higher rate limits)
+    pub docker_username: Option<String>,
+    
+    /// Docker Hub password/token (optional, for higher rate limits)
+    pub docker_password: Option<String>,
 }
 
 impl Config {
@@ -151,6 +157,14 @@ impl Config {
                 auto_rollback.unwrap(), auto_rollback_delay_secs);
         }
         
+        // Docker Hub credentials
+        let docker_username = std::env::var("DOCKER_USERNAME").ok().filter(|s| !s.is_empty());
+        let docker_password = std::env::var("DOCKER_PASSWORD").ok().filter(|s| !s.is_empty());
+        
+        if docker_username.is_some() && docker_password.is_some() {
+            tracing::info!("🐳 Docker Hub credentials loaded from environment (user: {})", docker_username.as_ref().unwrap());
+        }
+        
         Ok(Self {
             database_url,
             port,
@@ -170,6 +184,8 @@ impl Config {
             registry_credentials,
             auto_rollback,
             auto_rollback_delay_secs,
+            docker_username,
+            docker_password,
         })
     }
     

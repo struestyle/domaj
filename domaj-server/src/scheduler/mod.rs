@@ -61,6 +61,7 @@ impl Default for Scheduler {
 
 /// Run a full scan of all servers and containers
 pub async fn run_scan(state: &AppState) -> Result<()> {
+    let scan_start = std::time::Instant::now();
     tracing::info!("Starting full scan...");
     
     // Get all servers
@@ -74,13 +75,16 @@ pub async fn run_scan(state: &AppState) -> Result<()> {
     let mut digest_cache = DigestCache::new();
 
     for server in &servers {
+        let server_start = std::time::Instant::now();
         tracing::info!("Scanning server: {}", server.name);
         
         // Sync containers from agent first
+        let sync_start = std::time::Instant::now();
         if let Err(e) = sync_server_containers(state, server).await {
-            tracing::warn!("Failed to sync server {}: {}", server.name, e);
+            tracing::warn!("Failed to sync server {}: {} (took {:?})", server.name, e, sync_start.elapsed());
             continue;
         }
+        tracing::info!("⏱️  Sync {} took {:?}", server.name, sync_start.elapsed());
 
         // Get containers for this server
         let containers: Vec<Container> = sqlx::query_as(
@@ -91,25 +95,39 @@ pub async fn run_scan(state: &AppState) -> Result<()> {
         .await?;
 
         for container in &containers {
+            let container_start = std::time::Instant::now();
             match check_container_updates(state, container, &mut digest_cache).await {
                 Ok(has_update) => {
+                    let elapsed = container_start.elapsed();
+                    if elapsed.as_millis() > 500 {
+                        tracing::warn!("⏱️  Check {} took {:?} (SLOW)", container.name, elapsed);
+                    } else {
+                        tracing::info!("⏱️  Check {} took {:?}", container.name, elapsed);
+                    }
                     if has_update {
                         total_updates += 1;
                     }
                 }
                 Err(e) => {
+                    let err_msg = e.to_string();
+                    if err_msg.contains("429") || err_msg.contains("TOOMANYREQUESTS") {
+                        tracing::error!("🚫 Docker Hub rate limit hit — skipping remaining containers for {}", server.name);
+                        break;
+                    }
                     tracing::warn!(
-                        "Failed to check updates for {}/{}: {}",
+                        "Failed to check updates for {}/{}: {} (took {:?})",
                         server.name,
                         container.name,
-                        e
+                        e,
+                        container_start.elapsed()
                     );
                 }
             }
         }
+        tracing::info!("⏱️  Server {} total: {:?} ({} containers)", server.name, server_start.elapsed(), containers.len());
     }
 
-    tracing::info!("Scan complete. Found {} containers with updates", total_updates);
+    tracing::info!("⏱️  SCAN COMPLETE in {:?}. Found {} containers with updates. Cache: {} entries", scan_start.elapsed(), total_updates, digest_cache.len());
 
     // Broadcast scan completed event
     let _ = state.broadcast_tx.send(serde_json::json!({
@@ -362,11 +380,10 @@ async fn resolve_effective_tag(
         vb.cmp(&va)
     });
 
-    // Limit to avoid too many API calls
-    let check_limit = 100;
+    // Limit to avoid too many API calls — since tags are sorted by version
+    // descending, the first match will be the newest, which is what we want.
+    let check_limit = 15;
     let tags_to_check: Vec<&String> = semver_tags.into_iter().take(check_limit).collect();
-
-    let mut matching_tags: Vec<String> = Vec::new();
 
     tracing::debug!(
         "🔍 Resolving '{}': checking {} candidate tags against digest {}...",
@@ -375,31 +392,22 @@ async fn resolve_effective_tag(
         &digest[..20.min(digest.len())]
     );
 
-    // Check digests using cache
+    // Check digests using cache — stop at first match (best version since sorted desc)
+    let mut best_match: Option<String> = None;
     for tag in &tags_to_check {
         match cached_get_digest(client, repository, tag, digest_cache).await {
             Ok(tag_digest) => {
                 if tag_digest == digest {
-                    matching_tags.push(tag.to_string());
+                    best_match = Some(tag.to_string());
+                    break; // First match = newest version, no need to continue
                 }
             }
             Err(_) => {} // skip tags we can't resolve
         }
     }
 
-    if matching_tags.is_empty() {
-        return current_tag.to_string();
-    }
-
-    // Pick the most precise tag (highest depth: X.Y.Z > X.Y > X)
-    matching_tags.sort_by(|a, b| {
-        let depth_a = a.split('-').next().unwrap_or(a).split('.').count();
-        let depth_b = b.split('-').next().unwrap_or(b).split('.').count();
-        depth_b.cmp(&depth_a) // Most precise first
-    });
-
-    let effective = matching_tags[0].clone();
-    effective
+    // Return the best match or fall back to current tag
+    best_match.unwrap_or_else(|| current_tag.to_string())
 }
 
 /// Get a digest from cache, or fetch from registry and cache the result.
@@ -423,7 +431,19 @@ async fn cached_get_digest(
 /// Check for updates for a single container
 async fn check_container_updates(state: &AppState, container: &Container, digest_cache: &mut DigestCache) -> Result<bool> {
     let image_ref = ImageReference::parse(&container.image);
-    
+
+    // Skip local/compose images that don't exist on any registry
+    // These are images without a '/' in the name that get wrongly parsed as library/... on Docker Hub
+    if image_ref.registry == "docker.io" && image_ref.repository.starts_with("library/") {
+        let short_name = image_ref.repository.strip_prefix("library/").unwrap_or(&image_ref.repository);
+        // Official Docker Hub images have simple names (nginx, redis, postgres, etc.)
+        // Local/compose images typically contain underscores or hyphens from project names
+        if short_name.contains('_') {
+            tracing::debug!("⏭️  Skipping local/compose image: {} (parsed as {})", container.image, image_ref.repository);
+            return Ok(false);
+        }
+    }
+
     // Look up credentials for this registry (merged env + DB)
     let all_credentials = crate::api::registries::get_all_credentials(state).await;
     let credentials = all_credentials
@@ -435,13 +455,14 @@ async fn check_container_updates(state: &AppState, container: &Container, digest
     let mut has_any_update = false;
 
     // Fetch all tags for version gap calculation
+    let t = std::time::Instant::now();
     let all_tags = match client.list_tags_dyn(&image_ref.repository).await {
         Ok(tags) => {
-            tracing::debug!("Found {} tags for {}", tags.len(), container.image);
+            tracing::debug!("  📋 list_tags {} ({} tags) took {:?}", container.image, tags.len(), t.elapsed());
             tags
         }
         Err(e) => {
-            tracing::debug!("Failed to list tags for {}: {}", container.image, e);
+            tracing::debug!("  📋 list_tags {} failed ({:?}): {}", container.image, t.elapsed(), e);
             Vec::new()
         }
     };
@@ -451,6 +472,7 @@ async fn check_container_updates(state: &AppState, container: &Container, digest
     // We need TWO resolutions:
     // 1. LOCAL effective tag (using local digest) - for version gap calculation
     // 2. REMOTE effective tag (using remote digest) - for display purposes
+    let t = std::time::Instant::now();
     let local_effective_tag = resolve_effective_tag(
         client.as_ref(),
         &image_ref.repository,
@@ -459,6 +481,10 @@ async fn check_container_updates(state: &AppState, container: &Container, digest
         &all_tags,
         digest_cache,
     ).await;
+    let resolve_elapsed = t.elapsed();
+    if resolve_elapsed.as_millis() > 500 {
+        tracing::warn!("  🏷️  resolve_effective_tag {} took {:?} (SLOW)", container.name, resolve_elapsed);
+    }
 
     // Calculate version gap using the LOCAL effective tag
     let version_gap = if all_tags.is_empty() {
@@ -484,6 +510,7 @@ async fn check_container_updates(state: &AppState, container: &Container, digest
     }
 
     // Check 1: Same tag comparison
+    let t = std::time::Instant::now();
     match cached_get_digest(client.as_ref(), &image_ref.repository, &image_ref.tag, digest_cache).await {
         Ok(remote_digest) => {
             let local_digest = container.image_digest.clone();
@@ -500,6 +527,7 @@ async fn check_container_updates(state: &AppState, container: &Container, digest
             .bind(version_gap)
             .execute(&state.db)
             .await?;
+            tracing::debug!("  🔍 same_tag digest {} took {:?}", container.name, t.elapsed());
 
             if has_update {
                 tracing::info!(
@@ -517,13 +545,41 @@ async fn check_container_updates(state: &AppState, container: &Container, digest
             // still appears in the dashboard even if digest fetch is rate-limited
             if version_gap > 0 {
                 let local_digest = container.image_digest.clone();
+                // Try to get the remote digest from cache — we want the NEWEST tag's digest
+                // (resolve_effective_tag may have cached some tags during its search)
+                let mut remote_digest = String::new();
+                // Look for the newest semver tag's digest in the cache
+                for tag in &all_tags {
+                    if parse_semver(tag).is_some() {
+                        let cache_key = (image_ref.repository.clone(), tag.clone());
+                        if let Some(cached) = digest_cache.get(&cache_key) {
+                            if *cached != local_digest {
+                                remote_digest = cached.clone();
+                                break;
+                            }
+                        }
+                    }
+                }
+                // Fall back to last known digest from a previous scan
+                if remote_digest.is_empty() {
+                    let previous_digest: Option<(String,)> = sqlx::query_as(
+                        "SELECT remote_digest FROM update_checks WHERE container_id = $1 AND check_type = $2 AND remote_digest != '' ORDER BY checked_at DESC LIMIT 1",
+                    )
+                    .bind(container.id)
+                    .bind(CheckType::SameTag.to_string())
+                    .fetch_optional(&state.db)
+                    .await
+                    .unwrap_or(None);
+                    remote_digest = previous_digest.map(|(d,)| d).unwrap_or_default();
+                }
+
                 sqlx::query(
                     "INSERT INTO update_checks (container_id, check_type, local_digest, remote_digest, has_update, version_gap) VALUES ($1, $2, $3, $4, $5, $6)",
                 )
                 .bind(container.id)
                 .bind(CheckType::SameTag.to_string())
                 .bind(&local_digest)
-                .bind("")
+                .bind(&remote_digest)
                 .bind(1)
                 .bind(version_gap)
                 .execute(&state.db)
@@ -564,6 +620,36 @@ async fn check_container_updates(state: &AppState, container: &Container, digest
             }
             Err(e) => {
                 tracing::warn!("Failed to get latest digest for {}: {}", container.image, e);
+                // Try to reuse the last known remote digest for latest check
+                let previous_latest: Option<(String, String)> = sqlx::query_as(
+                    "SELECT remote_digest, COALESCE(latest_tag, 'latest') FROM update_checks WHERE container_id = $1 AND check_type = $2 AND remote_digest != '' ORDER BY checked_at DESC LIMIT 1",
+                )
+                .bind(container.id)
+                .bind(CheckType::Latest.to_string())
+                .fetch_optional(&state.db)
+                .await
+                .unwrap_or(None);
+
+                if let Some((prev_digest, prev_tag)) = previous_latest {
+                    let local_digest = container.image_digest.clone();
+                    let has_update = !local_digest.is_empty() && local_digest != prev_digest;
+                    sqlx::query(
+                        "INSERT INTO update_checks (container_id, check_type, local_digest, remote_digest, has_update, latest_tag, version_gap) VALUES ($1, $2, $3, $4, $5, $6, $7)",
+                    )
+                    .bind(container.id)
+                    .bind(CheckType::Latest.to_string())
+                    .bind(&local_digest)
+                    .bind(&prev_digest)
+                    .bind(has_update as i32)
+                    .bind(&prev_tag)
+                    .bind(version_gap)
+                    .execute(&state.db)
+                    .await?;
+
+                    if has_update {
+                        has_any_update = true;
+                    }
+                }
             }
         }
     }

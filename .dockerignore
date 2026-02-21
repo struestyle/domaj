@@ -1,0 +1,19 @@
+# Dependencies
+**/node_modules
+domaj-web/node_modules
+
+# Build outputs
+domaj-web/build
+domaj-server/target
+
+# Git
+.git
+.github
+
+# IDE
+.vscode
+.idea
+
+# Env files
+*.env
+*.env.example

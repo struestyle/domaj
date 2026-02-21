@@ -15,6 +15,7 @@ use axum::Router;
 use sqlx::AnyPool;
 use tokio::sync::{broadcast, RwLock};
 use tower_http::cors::{Any, CorsLayer};
+use tower_http::services::{ServeDir, ServeFile};
 use tower_http::trace::TraceLayer;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
@@ -80,8 +81,15 @@ async fn main() -> anyhow::Result<()> {
     tracing::info!("📅 Scheduler started");
 
     // Build router
+    let api_router = api::router(config.jwt_secret.clone());
+    
+    // Serve static files from "public" directory, fallback to "public/index.html" for SPA routing
+    let static_files_service = ServeDir::new("public")
+        .not_found_service(ServeFile::new("public/index.html"));
+
     let app = Router::new()
-        .nest("/api", api::router(config.jwt_secret.clone()))
+        .nest("/api", api_router)
+        .fallback_service(static_files_service)
         .layer(CorsLayer::new().allow_origin(Any).allow_methods(Any).allow_headers(Any))
         .layer(TraceLayer::new_for_http())
         .with_state(state);

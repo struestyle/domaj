@@ -43,8 +43,7 @@ docker compose up -d
 ```
 
 4. **Accédez à l'interface** :
-   - Frontend : http://localhost:8080
-   - API : http://localhost:3000
+   - Interface Web et API unifiés sur le même port : http://localhost:3000
 
 ## 🖥️ Déploiement de l'agent
 
@@ -94,23 +93,23 @@ SCAN_INTERVAL="0 */6 * * *"
 ```
 domaj/
 ├── docker-compose.yml    # Orchestration
-├── domaj-server/         # Backend Rust (API + scheduler)
+├── domaj-server/         # Backend Rust (API + scheduler) sert aussi le frontend compilé
 ├── domaj-agent/          # Agent Docker distant
-└── domaj-web/            # Frontend SvelteKit
+└── domaj-web/            # Code source du Frontend SvelteKit (compilé et servi par domaj-server)
 ```
 
 ### Lancer en développement
 
 ```bash
-# Backend
+# Backend et Frontend
 cd domaj-server
 cargo run
 
-# Agent  
+# Agent diststant
 cd domaj-agent
 cargo run
 
-# Frontend
+# Pour développer le frontend avec rechargement à chaud (Hot Module Replacement)
 cd domaj-web
 npm install
 npm run dev

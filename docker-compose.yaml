@@ -12,17 +12,6 @@ services:
     env_file:
       - domaj-server.env
 
-  web:
-    image: hb.louislelievre.fr/domaj/domaj-web:latest
-    container_name: domaj-web
-    ports:
-      - "${WEB_PORT:-8081}:80"
-    depends_on:
-      - server
-    restart: unless-stopped
-    env_file:
-      - domaj-web.env
-
   agent:
     image: hb.louislelievre.fr/domaj/domaj-agent:latest
     container_name: domaj-agent

@@ -31,17 +31,6 @@ services:
     environment:
       DATABASE_URL: postgres://domaj:${POSTGRES_PASSWORD:-domaj-secret}@postgres:5432/domaj
 
-  web:
-    image: hb.louislelievre.fr/domaj/domaj-web:latest
-    container_name: domaj-web
-    ports:
-      - "${WEB_PORT:-8080}:80"
-    depends_on:
-      - server
-    restart: unless-stopped
-    env_file:
-      - domaj-web.env
-
   agent:
     image: hb.louislelievre.fr/domaj/domaj-agent:latest
     container_name: domaj-agent

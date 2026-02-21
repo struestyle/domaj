@@ -479,6 +479,10 @@
         margin-bottom: var(--spacing-xs);
     }
 
+    .add-form {
+        padding: var(--spacing-lg);
+    }
+
     .add-form h3 {
         margin-bottom: var(--spacing-lg);
     }

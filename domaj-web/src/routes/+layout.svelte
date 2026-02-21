@@ -12,10 +12,12 @@
     checkAuth,
     getToken,
   } from "$lib/stores/auth.js";
+  import { initTheme } from "$lib/stores/theme.js";
 
   $: isLoginPage = $page.url.pathname === "/login";
 
   onMount(async () => {
+    initTheme();
     if (!isLoginPage) {
       const authenticated = await checkAuth();
       if (!authenticated) {

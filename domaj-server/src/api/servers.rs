@@ -92,18 +92,29 @@ pub async fn create_server(
     // Generate a unique API key for this server
     let api_key = Uuid::new_v4().to_string();
 
-    let server: Server = sqlx::query_as(
-        "INSERT INTO servers (name, endpoint, api_key, agent_id) VALUES ($1, $2, $3, $4) RETURNING *",
+    let result = sqlx::query(
+        "INSERT INTO servers (name, endpoint, api_key, agent_id) VALUES ($1, $2, $3, $4)",
     )
     .bind(&input.name)
     .bind(&input.endpoint)
     .bind(&api_key)
     .bind(&agent_id)
-    .fetch_one(&state.db)
+    .execute(&state.db)
     .await
     .map_err(|e| {
         tracing::error!("Failed to create server: {}", e);
         (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": "Failed to create server"})))
+    })?;
+
+    let server: Server = sqlx::query_as(
+        &format!("SELECT {} FROM servers WHERE api_key = $1", crate::db::SELECT_SERVERS),
+    )
+    .bind(&api_key)
+    .fetch_one(&state.db)
+    .await
+    .map_err(|e| {
+        tracing::error!("Failed to fetch created server: {}", e);
+        (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": "Failed to fetch server"})))
     })?;
 
     tracing::info!("Created server: {} ({}) with agent_id: {:?}", server.name, server.endpoint, agent_id);

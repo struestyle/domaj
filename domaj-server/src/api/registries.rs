@@ -41,6 +41,18 @@ pub async fn get_all_credentials(state: &AppState) -> Vec<RegistryCredential> {
     let mut credentials: Vec<RegistryCredential> = state.config.registry_credentials.clone();
     let env_hosts: Vec<String> = credentials.iter().map(|c| c.host.clone()).collect();
 
+    // Add Docker Hub credentials from env vars (DOCKER_USERNAME/DOCKER_PASSWORD)
+    let has_docker_env = state.config.docker_username.is_some() && state.config.docker_password.is_some();
+    if has_docker_env {
+        if !env_hosts.contains(&"docker.io".to_string()) {
+            credentials.push(RegistryCredential {
+                host: "docker.io".to_string(),
+                username: state.config.docker_username.clone().unwrap(),
+                password: state.config.docker_password.clone().unwrap(),
+            });
+        }
+    }
+
     // Add DB credentials that don't conflict with env ones
     let db_creds: Vec<DbRegistryCredential> = sqlx::query_as(
         &format!("SELECT {} FROM registry_credentials", crate::db::SELECT_REGISTRY_CREDS)
@@ -49,13 +61,41 @@ pub async fn get_all_credentials(state: &AppState) -> Vec<RegistryCredential> {
     .await
     .unwrap_or_default();
 
+    let current_hosts: Vec<String> = credentials.iter().map(|c| c.host.clone()).collect();
     for db_cred in db_creds {
-        if !env_hosts.contains(&db_cred.host) {
+        if !current_hosts.contains(&db_cred.host) {
             credentials.push(RegistryCredential {
                 host: db_cred.host,
                 username: db_cred.username,
                 password: db_cred.password,
             });
+        }
+    }
+
+    // Add Docker Hub credentials from DB settings (if not already set by env)
+    if !has_docker_env && !credentials.iter().any(|c| c.host == "docker.io") {
+        let docker_user: Option<(String,)> = sqlx::query_as(
+            "SELECT value FROM settings WHERE key = 'docker_username'"
+        )
+        .fetch_optional(&state.db)
+        .await
+        .unwrap_or(None);
+
+        let docker_pass: Option<(String,)> = sqlx::query_as(
+            "SELECT value FROM settings WHERE key = 'docker_password'"
+        )
+        .fetch_optional(&state.db)
+        .await
+        .unwrap_or(None);
+
+        if let (Some((username,)), Some((password,))) = (docker_user, docker_pass) {
+            if !username.is_empty() && !password.is_empty() {
+                credentials.push(RegistryCredential {
+                    host: "docker.io".to_string(),
+                    username,
+                    password,
+                });
+            }
         }
     }
 

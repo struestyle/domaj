@@ -94,7 +94,10 @@ pub trait RegistryClient: Send + Sync {
 /// Get the appropriate registry client for an image
 pub fn get_registry_client(registry: &str, credentials: Option<&RegistryCredential>) -> Box<dyn RegistryClientDyn> {
     match registry {
-        "docker.io" | "registry-1.docker.io" => Box::new(DockerHubClient::new()),
+        "docker.io" | "registry-1.docker.io" => {
+            let docker_creds = credentials.map(|c| (c.username.clone(), c.password.clone()));
+            Box::new(DockerHubClient::new(docker_creds))
+        }
         "quay.io" => Box::new(QuayClient::new()),
         "ghcr.io" => Box::new(GhcrClient::new()),
         _ => Box::new(GenericClient::new(registry, credentials.cloned())),

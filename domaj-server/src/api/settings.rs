@@ -18,7 +18,7 @@ pub struct UpdateSettingRequest {
 }
 
 /// Known settings and their types
-const VALID_SETTINGS: &[&str] = &["auto_rollback", "auto_rollback_delay"];
+const VALID_SETTINGS: &[&str] = &["auto_rollback", "auto_rollback_delay", "docker_username", "docker_password"];
 
 /// Get all settings with lock status
 pub async fn get_settings(
@@ -36,7 +36,7 @@ pub async fn get_settings(
 
     let mut settings = serde_json::Map::new();
     
-    for (key, value) in rows {
+    for (key, value) in &rows {
         let (parsed_value, locked) = match key.as_str() {
             "auto_rollback" => {
                 let locked = state.config.auto_rollback.is_some();
@@ -56,11 +56,61 @@ pub async fn get_settings(
                 };
                 (serde_json::json!(effective_value), locked)
             }
-            _ => (serde_json::Value::String(value), false),
+            "docker_username" => {
+                let locked = state.config.docker_username.is_some();
+                let effective_value = if locked {
+                    state.config.docker_username.clone().unwrap_or_default()
+                } else {
+                    value.clone()
+                };
+                (serde_json::Value::String(effective_value), locked)
+            }
+            "docker_password" => {
+                let locked = state.config.docker_password.is_some();
+                let effective_value = if locked {
+                    state.config.docker_password.clone().unwrap_or_default()
+                } else {
+                    value.clone()
+                };
+                // Mask the password
+                let display = if effective_value.is_empty() {
+                    String::new()
+                } else {
+                    "••••••••".to_string()
+                };
+                (serde_json::Value::String(display), locked)
+            }
+            _ => (serde_json::Value::String(value.clone()), false),
         };
         
-        settings.insert(key, serde_json::json!({
+        settings.insert(key.clone(), serde_json::json!({
             "value": parsed_value,
+            "locked": locked,
+        }));
+    }
+
+    // Ensure docker_username and docker_password always appear
+    if !settings.contains_key("docker_username") {
+        let locked = state.config.docker_username.is_some();
+        let value = if locked {
+            state.config.docker_username.clone().unwrap_or_default()
+        } else {
+            String::new()
+        };
+        settings.insert("docker_username".to_string(), serde_json::json!({
+            "value": value,
+            "locked": locked,
+        }));
+    }
+    if !settings.contains_key("docker_password") {
+        let locked = state.config.docker_password.is_some();
+        let display = if locked && state.config.docker_password.is_some() {
+            "••••••••".to_string()
+        } else {
+            String::new()
+        };
+        settings.insert("docker_password".to_string(), serde_json::json!({
+            "value": display,
             "locked": locked,
         }));
     }
@@ -85,6 +135,8 @@ pub async fn update_setting(
     let locked = match key.as_str() {
         "auto_rollback" => state.config.auto_rollback.is_some(),
         "auto_rollback_delay" => std::env::var("AUTO_ROLLBACK_DELAY").is_ok(),
+        "docker_username" => state.config.docker_username.is_some(),
+        "docker_password" => state.config.docker_password.is_some(),
         _ => false,
     };
     
@@ -112,6 +164,14 @@ pub async fn update_setting(
                 })))),
             }
         }
+        "docker_username" | "docker_password" => {
+            match body.value.as_str() {
+                Some(s) => s.to_string(),
+                None => return Err((StatusCode::BAD_REQUEST, Json(serde_json::json!({
+                    "error": format!("{} doit être une chaîne de caractères", key)
+                })))),
+            }
+        }
         _ => body.value.to_string(),
     };
     
@@ -130,11 +190,17 @@ pub async fn update_setting(
         })))
     })?;
     
-    tracing::info!("⚙️ Setting '{}' updated to '{}'", key, value_str);
+    let display_value = if key == "docker_password" && !value_str.is_empty() {
+        "••••••••".to_string()
+    } else {
+        value_str.clone()
+    };
+    
+    tracing::info!("⚙️ Setting '{}' updated to '{}'", key, display_value);
     
     Ok(Json(serde_json::json!({
         "key": key,
-        "value": value_str,
+        "value": display_value,
     })))
 }
 
