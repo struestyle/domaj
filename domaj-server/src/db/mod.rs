@@ -14,6 +14,7 @@ pub const SELECT_UPDATE_CHECKS: &str = "id, container_id, check_type, local_dige
 pub const SELECT_UPDATE_JOBS: &str = "id, container_id, container_name, server_name, image, COALESCE(target_tag, '') AS target_tag, status, COALESCE(error_message, '') AS error_message, COALESCE(previous_image, '') AS previous_image, job_type, CAST(started_at AS TEXT) AS started_at, COALESCE(CAST(completed_at AS TEXT), '') AS completed_at";
 pub const SELECT_REGISTRY_CREDS: &str = "id, host, username, password, CAST(created_at AS TEXT) AS created_at";
 pub const SELECT_USERS: &str = "id, username, password_hash, role, CAST(created_at AS TEXT) AS created_at";
+pub const SELECT_AUDIT_LOGS: &str = "id, username, action, COALESCE(details, '') AS details, CAST(created_at AS TEXT) AS created_at";
 
 use anyhow::Result;
 use sqlx::any::AnyPoolOptions;
@@ -210,6 +211,24 @@ async fn run_sqlite_migrations(pool: &AnyPool) -> Result<()> {
         .execute(pool)
         .await?;
 
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS audit_logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT NOT NULL,
+            action TEXT NOT NULL,
+            details TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+        "#,
+    )
+    .execute(pool)
+    .await?;
+
+    sqlx::query("CREATE INDEX IF NOT EXISTS idx_audit_logs_created ON audit_logs(created_at)")
+        .execute(pool)
+        .await?;
+
     tracing::debug!("SQLite migrations completed");
     Ok(())
 }
@@ -350,6 +369,24 @@ async fn run_postgres_migrations(pool: &AnyPool) -> Result<()> {
         .execute(pool)
         .await?;
     sqlx::query("INSERT INTO settings (key, value) VALUES ('auto_rollback_delay', '30') ON CONFLICT (key) DO NOTHING")
+        .execute(pool)
+        .await?;
+
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS audit_logs (
+            id BIGSERIAL PRIMARY KEY,
+            username TEXT NOT NULL,
+            action TEXT NOT NULL,
+            details TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+        "#,
+    )
+    .execute(pool)
+    .await?;
+
+    sqlx::query("CREATE INDEX IF NOT EXISTS idx_audit_logs_created ON audit_logs(created_at)")
         .execute(pool)
         .await?;
 

@@ -181,3 +181,13 @@ pub struct DbRegistryCredential {
     pub password: String,
     pub created_at: String,
 }
+
+/// An audit log entry
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct AuditLog {
+    pub id: i64,
+    pub username: String,
+    pub action: String,
+    pub details: String,
+    pub created_at: String,
+}

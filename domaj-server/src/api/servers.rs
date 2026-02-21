@@ -47,6 +47,7 @@ pub async fn get_server(
 /// Create a new server
 pub async fn create_server(
     State(state): State<Arc<AppState>>,
+    claims: crate::api::auth::Claims,
     Json(input): Json<CreateServer>,
 ) -> Result<(StatusCode, Json<Server>), (StatusCode, Json<serde_json::Value>)> {
     // Fetch agent info to get unique agent_id
@@ -118,12 +119,20 @@ pub async fn create_server(
     })?;
 
     tracing::info!("Created server: {} ({}) with agent_id: {:?}", server.name, server.endpoint, agent_id);
+
+    // Audit log
+    crate::api::audit::log_action(
+        &state.db, &claims.username, "server_add",
+        &format!("{} ({})", server.name, server.endpoint)
+    ).await;
+
     Ok((StatusCode::CREATED, Json(server)))
 }
 
 /// Delete a server
 pub async fn delete_server(
     State(state): State<Arc<AppState>>,
+    claims: crate::api::auth::Claims,
     Path(id): Path<i64>,
 ) -> Result<StatusCode, StatusCode> {
     let result = sqlx::query("DELETE FROM servers WHERE id = $1")
@@ -140,6 +149,13 @@ pub async fn delete_server(
     }
 
     tracing::info!("Deleted server with id: {}", id);
+
+    // Audit log
+    crate::api::audit::log_action(
+        &state.db, &claims.username, "server_delete",
+        &format!("Serveur id={}", id)
+    ).await;
+
     Ok(StatusCode::NO_CONTENT)
 }
 

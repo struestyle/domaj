@@ -3,6 +3,7 @@
 //! RESTful API endpoints for managing servers, containers, and updates.
 
 pub mod auth;
+pub mod audit;
 mod containers;
 pub mod registries;
 mod servers;
@@ -95,6 +96,9 @@ pub fn router(jwt_secret: String) -> Router<Arc<AppState>> {
         .route("/settings", get(settings::get_settings))
         .route("/settings/test-docker", post(settings::test_docker_credentials))
         .route("/settings/:key", put(settings::update_setting))
+        
+        // Audit logs
+        .route("/audit-logs", get(audit::list_audit_logs))
         .layer(middleware::from_fn_with_state(jwt_secret, auth::auth_middleware));
     
     // WebSocket route (handles its own auth via query param)

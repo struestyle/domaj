@@ -1,12 +1,19 @@
 <script>
     import { onMount, onDestroy } from "svelte";
-    import { getUpdateJobs, rollbackJob } from "$lib/api.js";
+    import { getUpdateJobs, rollbackJob, getAuditLogs } from "$lib/api.js";
     import { websocketStore } from "$lib/stores/websocket.js";
 
     let jobs = [];
     let loading = true;
     let error = null;
     let rollingBack = null;
+
+    // Audit logs state
+    let auditLogs = [];
+    let auditTotal = 0;
+    let auditOffset = 0;
+    const auditLimit = 30;
+    let auditLoading = false;
 
     async function handleRollback(job) {
         if (rollingBack) return;
@@ -46,9 +53,81 @@
         }
     });
 
+    async function loadAuditLogs() {
+        auditLoading = true;
+        try {
+            const data = await getAuditLogs(auditLimit, auditOffset);
+            auditLogs = data.logs;
+            auditTotal = data.total;
+        } catch (e) {
+            console.error("Failed to load audit logs:", e);
+        } finally {
+            auditLoading = false;
+        }
+    }
+
+    async function auditPrev() {
+        auditOffset = Math.max(0, auditOffset - auditLimit);
+        await loadAuditLogs();
+    }
+
+    async function auditNext() {
+        if (auditOffset + auditLimit < auditTotal) {
+            auditOffset += auditLimit;
+            await loadAuditLogs();
+        }
+    }
+
+    function actionBadgeClass(action) {
+        switch (action) {
+            case "login":
+                return "badge-login";
+            case "scan":
+                return "badge-scan";
+            case "update":
+                return "badge-update";
+            case "rollback":
+                return "badge-rollback";
+            case "settings_change":
+                return "badge-settings";
+            case "server_add":
+                return "badge-server-add";
+            case "server_delete":
+                return "badge-server-delete";
+            case "credentials_change":
+                return "badge-credentials";
+            default:
+                return "";
+        }
+    }
+
+    function actionLabel(action) {
+        switch (action) {
+            case "login":
+                return "Connexion";
+            case "scan":
+                return "Scan";
+            case "update":
+                return "Mise a jour";
+            case "rollback":
+                return "Rollback";
+            case "settings_change":
+                return "Parametre";
+            case "server_add":
+                return "Serveur +";
+            case "server_delete":
+                return "Serveur -";
+            case "credentials_change":
+                return "Credentials";
+            default:
+                return action;
+        }
+    }
+
     onMount(async () => {
         websocketStore.connect();
         await loadJobs();
+        await loadAuditLogs();
         loading = false;
     });
 
@@ -338,6 +417,94 @@
             {/if}
         </section>
     {/if}
+
+    <!-- Audit Logs -->
+    <section class="section">
+        <div class="section-header">
+            <h2 class="section-title">
+                <svg
+                    class="section-icon"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                >
+                    <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"
+                    ></path>
+                </svg>
+                Audit
+                <span class="badge badge-info">{auditTotal}</span>
+            </h2>
+        </div>
+
+        {#if auditLoading}
+            <div class="card loading-card">
+                <span class="spinner"></span> Chargement...
+            </div>
+        {:else if auditLogs.length === 0}
+            <div class="card empty-state">
+                <h3>Aucun log d'audit</h3>
+                <p class="text-muted">Les actions seront enregistrees ici.</p>
+            </div>
+        {:else}
+            <div class="table-container card">
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>Date</th>
+                            <th>Utilisateur</th>
+                            <th>Action</th>
+                            <th>Details</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {#each auditLogs as log (log.id)}
+                            <tr>
+                                <td class="date-cell"
+                                    >{formatDate(log.created_at)}</td
+                                >
+                                <td><strong>{log.username}</strong></td>
+                                <td>
+                                    <span
+                                        class="badge {actionBadgeClass(
+                                            log.action,
+                                        )}"
+                                    >
+                                        {actionLabel(log.action)}
+                                    </span>
+                                </td>
+                                <td class="details-cell"
+                                    >{log.details || "\u2014"}</td
+                                >
+                            </tr>
+                        {/each}
+                    </tbody>
+                </table>
+            </div>
+            <div class="pagination">
+                <button
+                    class="btn btn-sm"
+                    on:click={auditPrev}
+                    disabled={auditOffset === 0}
+                >
+                    &larr; Precedent
+                </button>
+                <span class="text-muted text-sm">
+                    {auditOffset + 1} - {Math.min(
+                        auditOffset + auditLimit,
+                        auditTotal,
+                    )} sur {auditTotal}
+                </span>
+                <button
+                    class="btn btn-sm"
+                    on:click={auditNext}
+                    disabled={auditOffset + auditLimit >= auditTotal}
+                >
+                    Suivant &rarr;
+                </button>
+            </div>
+        {/if}
+    </section>
 </div>
 
 <style>
@@ -555,5 +722,74 @@
         to {
             transform: rotate(360deg);
         }
+    }
+
+    /* Audit log badges */
+    .badge-login {
+        background: rgba(34, 197, 94, 0.15);
+        color: #22c55e;
+    }
+
+    .badge-scan {
+        background: rgba(59, 130, 246, 0.15);
+        color: #3b82f6;
+    }
+
+    .badge-settings {
+        background: rgba(245, 158, 11, 0.15);
+        color: #f59e0b;
+    }
+
+    .badge-server-add {
+        background: rgba(34, 197, 94, 0.15);
+        color: #22c55e;
+    }
+
+    .badge-server-delete {
+        background: rgba(239, 68, 68, 0.15);
+        color: #ef4444;
+    }
+
+    .badge-credentials {
+        background: rgba(168, 85, 247, 0.15);
+        color: #a855f7;
+    }
+
+    .details-cell {
+        max-width: 400px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font-size: 0.85rem;
+        color: var(--text-secondary);
+    }
+
+    .pagination {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: var(--spacing-md);
+        margin-top: var(--spacing-md);
+    }
+
+    .btn-sm {
+        padding: 4px 12px;
+        font-size: 0.8rem;
+        background: var(--bg-card);
+        color: var(--text-primary);
+        border: 1px solid var(--border-color);
+        border-radius: var(--border-radius);
+        cursor: pointer;
+        transition: all 0.2s;
+    }
+
+    .btn-sm:hover:not(:disabled) {
+        background: var(--bg-hover, rgba(255, 255, 255, 0.05));
+        border-color: var(--color-info, #3b82f6);
+    }
+
+    .btn-sm:disabled {
+        opacity: 0.4;
+        cursor: not-allowed;
     }
 </style>

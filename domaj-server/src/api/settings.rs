@@ -121,6 +121,7 @@ pub async fn get_settings(
 /// Update a specific setting
 pub async fn update_setting(
     State(state): State<Arc<AppState>>,
+    claims: crate::api::auth::Claims,
     Path(key): Path<String>,
     Json(body): Json<UpdateSettingRequest>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
@@ -196,7 +197,13 @@ pub async fn update_setting(
         value_str.clone()
     };
     
-    tracing::info!("⚙️ Setting '{}' updated to '{}'", key, display_value);
+    tracing::info!("Setting '{}' updated to '{}'", key, display_value);
+    
+    // Audit log
+    crate::api::audit::log_action(
+        &state.db, &claims.username, "settings_change",
+        &format!("{} = {}", key, display_value)
+    ).await;
     
     Ok(Json(serde_json::json!({
         "key": key,

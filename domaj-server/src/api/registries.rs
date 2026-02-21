@@ -233,6 +233,7 @@ pub struct CredentialInput {
 /// Create a new registry credential
 pub async fn create_credential(
     State(state): State<Arc<AppState>>,
+    claims: crate::api::auth::Claims,
     Json(input): Json<CredentialInput>,
 ) -> Result<(StatusCode, Json<serde_json::Value>), (StatusCode, Json<serde_json::Value>)> {
     // Check if host conflicts with env credential
@@ -265,6 +266,12 @@ pub async fn create_credential(
         }
     })?;
 
+    // Audit log
+    crate::api::audit::log_action(
+        &state.db, &claims.username, "credentials_change",
+        &format!("Ajout credentials pour {}", input.host)
+    ).await;
+
     Ok((
         StatusCode::CREATED,
         Json(serde_json::json!({"status": "created"})),
@@ -274,6 +281,7 @@ pub async fn create_credential(
 /// Update an existing DB registry credential
 pub async fn update_credential(
     State(state): State<Arc<AppState>>,
+    claims: crate::api::auth::Claims,
     Path(id): Path<i64>,
     Json(input): Json<CredentialInput>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
@@ -300,12 +308,19 @@ pub async fn update_credential(
         ));
     }
 
+    // Audit log
+    crate::api::audit::log_action(
+        &state.db, &claims.username, "credentials_change",
+        &format!("Modification credentials pour {}", input.host)
+    ).await;
+
     Ok(Json(serde_json::json!({"status": "updated"})))
 }
 
 /// Delete a DB registry credential
 pub async fn delete_credential(
     State(state): State<Arc<AppState>>,
+    claims: crate::api::auth::Claims,
     Path(id): Path<i64>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
     let result = sqlx::query("DELETE FROM registry_credentials WHERE id = $1")
@@ -325,6 +340,12 @@ pub async fn delete_credential(
             Json(serde_json::json!({"error": "Credential non trouvé"})),
         ));
     }
+
+    // Audit log
+    crate::api::audit::log_action(
+        &state.db, &claims.username, "credentials_change",
+        &format!("Suppression credentials id={}", id)
+    ).await;
 
     Ok(Json(serde_json::json!({"status": "deleted"})))
 }

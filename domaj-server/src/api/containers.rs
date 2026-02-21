@@ -194,6 +194,7 @@ pub async fn list_updates(
 /// Trigger a manual scan
 pub async fn trigger_scan(
     State(state): State<Arc<AppState>>,
+    claims: crate::api::auth::Claims,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
     // Check if any servers are configured
     let server_count: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM servers")
@@ -210,6 +211,9 @@ pub async fn trigger_scan(
             "message": "Aucun serveur configuré"
         })));
     }
+
+    // Audit log
+    crate::api::audit::log_action(&state.db, &claims.username, "scan", "Scan manuel lancé").await;
 
     // Run the scan in background
     let state_clone = state.clone();
@@ -235,6 +239,7 @@ pub struct UpdateContainerRequest {
 /// Update a container via its agent (async with job tracking)
 pub async fn update_container(
     State(state): State<Arc<AppState>>,
+    claims: crate::api::auth::Claims,
     Path(id): Path<i64>,
     Json(body): Json<UpdateContainerRequest>,
 ) -> Result<(StatusCode, Json<serde_json::Value>), (StatusCode, Json<serde_json::Value>)> {
@@ -263,6 +268,12 @@ pub async fn update_container(
         server.name,
         body.target_tag
     );
+
+    // Audit log
+    crate::api::audit::log_action(
+        &state.db, &claims.username, "update",
+        &format!("{} sur {} (tag: {:?})", container.name, server.name, body.target_tag)
+    ).await;
 
     // Create job in database (store current image as previous_image for rollback)
     let job_id: i64 = sqlx::query_scalar(
@@ -609,6 +620,7 @@ pub async fn list_update_jobs(
 /// Rollback a container to its previous image
 pub async fn rollback_job(
     State(state): State<Arc<AppState>>,
+    claims: crate::api::auth::Claims,
     Path(job_id): Path<i64>,
 ) -> Result<(StatusCode, Json<serde_json::Value>), (StatusCode, Json<serde_json::Value>)> {
     // Get the original job
@@ -642,6 +654,12 @@ pub async fn rollback_job(
         server.name,
         previous_image
     );
+
+    // Audit log
+    crate::api::audit::log_action(
+        &state.db, &claims.username, "rollback",
+        &format!("{} sur {} → {}", original_job.container_name, server.name, previous_image)
+    ).await;
 
     // Create rollback job
     let rollback_job_id: i64 = sqlx::query_scalar(

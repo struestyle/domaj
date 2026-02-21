@@ -158,3 +158,7 @@ export async function testDockerCredentials() {
         method: 'POST'
     });
 }
+
+export async function getAuditLogs(limit = 50, offset = 0) {
+    return fetchApi(`/audit-logs?limit=${limit}&offset=${offset}`);
+}

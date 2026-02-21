@@ -140,6 +140,9 @@ pub async fn login(
     let token = create_jwt(user.id, &user.username, &user.role, &state.config.jwt_secret)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
+    // Audit log
+    crate::api::audit::log_action(&state.db, &user.username, "login", "Connexion réussie").await;
+
     Ok(Json(AuthResponse {
         token,
         user: user.into(),

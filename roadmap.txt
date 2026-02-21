@@ -16,25 +16,22 @@
 - [x] Intégration Telegram (API Bot via reqwest)
 
 ## Version 1.2 - Registres Privés & Database
-- [ ] Support PostgreSQL comme base de données externe
-- [ ] Migration SQLite vers PostgreSQL
-- [ ] Migration sqlx → SeaORM (ORM async)
+- [x] Support PostgreSQL comme base de données externe
+- [x] Migration SQLite vers PostgreSQL
 - [x] Support Harbor
 - [x] Gestion des credentials par registre
 
 ## Version 1.3 - Actions Automatiques
 - [x] Déclenchement de mise à jour depuis l'interface
 - [x] Pull automatique d'images
-- [ ] Restart de conteneurs
-- [ ] Rollback vers version précédente
-- [ ] Dry-run mode (simulation)
+- [x] Rollback vers version précédente
 
 ## Version 1.4 - Authentification Avancée
 - [ ] Support OIDC/OAuth2
 - [ ] Intégration Keycloak
 - [ ] Intégration Auth0
 - [ ] Gestion des rôles (admin/viewer)
-- [ ] Audit logs des actions
+- [x] Audit logs des actions
 
 ## Version 2.0 - Sécurité & Observabilité
 - [ ] TLS mutuel (mTLS) serveur↔agent avec PKI (serveur de certificats)
