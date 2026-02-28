@@ -115,8 +115,8 @@
             : true;
     let showNew =
         typeof localStorage !== "undefined"
-            ? (localStorage.getItem("showNew") ?? "true") === "true"
-            : true;
+            ? (localStorage.getItem("showNew") ?? "false") === "true"
+            : false;
 
     $: if (typeof localStorage !== "undefined") {
         localStorage.setItem("showPatches", showPatches);
