@@ -3,7 +3,7 @@ services:
     image: hb.louislelievre.fr/domaj/domaj-server:latest
     container_name: domaj-server
     ports:
-      - "${SERVER_PORT:-3000}:3000"
+      - "${SERVER_PORT:-8080}:3000"
     volumes:
       - domaj-data:/data
     restart: unless-stopped
